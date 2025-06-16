@@ -1,0 +1,21 @@
+services:
+  db:
+    image: postgres:15
+    container_name: revclarity_postgres
+    environment:
+      POSTGRES_USER: revclarity_user
+      POSTGRES_PASSWORD: revclarity_password
+      POSTGRES_DB: revclarity_db
+    ports:
+      - "5438:5432" # <<< THE CRITICAL CHANGE IS HERE
+    volumes:
+      - postgres_data:/var/lib/postgresql/data/
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U revclarity_user -d revclarity_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
