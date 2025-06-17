@@ -1,63 +1,43 @@
 import uuid
-import os
-from pathlib import Path
 import logging
-
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, BackgroundTasks, Form
-from sqlalchemy.orm import Session
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
+from sqlalchemy.orm import Session, joinedload
 from typing import List
+from fastapi.responses import Response
 
 from app import models, schemas
 from app.api.deps import get_db
 from app.crud import crud_claim, crud_patient
-from app.tasks import process_claim_documents, llm_service
+from app.tasks import process_claim_documents
 from app.models.claim import ClaimStatus
+from app.utils.file_handling import save_upload_file
+from app.services import pdf_service
 
 router = APIRouter(
     prefix="/claims",
     tags=["Claims"],
 )
 
-UPLOAD_DIRECTORY = "./uploads"
-Path(UPLOAD_DIRECTORY).mkdir(parents=True, exist_ok=True)
-
 logger = logging.getLogger(__name__)
 
-def save_upload_file(upload_file: UploadFile) -> str:
-    # Sanitize filename to prevent directory traversal attacks
-    filename = Path(upload_file.filename).name
-    file_path = os.path.join(UPLOAD_DIRECTORY, filename)
-    with open(file_path, "wb") as buffer:
-        buffer.write(upload_file.file.read())
-    return file_path
-
 @router.post("/upload", response_model=schemas.Claim, status_code=201)
-async def create_claim_from_upload(
-    background_tasks: BackgroundTasks,
+def create_claim_from_upload(
     patient_id: uuid.UUID = Form(...),
     file: UploadFile = File(...),
     db: Session = Depends(get_db)
 ):
     """
     The primary endpoint to initiate a new claim.
-    This will create a placeholder claim for a given patient,
-    save the associated document, and kick off the full AI pipeline.
-    
-    Note: For uploading other document types like 'POLICY_DOC', a separate
-    endpoint on the /patients router should be used.
+    Dispatches a task to the Celery queue for AI processing.
     """
-    # 1. Verify patient exists
     patient = crud_patient.get_patient(db, patient_id=patient_id)
     if not patient:
         raise HTTPException(status_code=404, detail=f"Patient with id {patient_id} not found.")
 
-    # 2. Save the uploaded file
     file_path = save_upload_file(file)
     
-    # 3. Create a new placeholder claim
     new_claim = crud_claim.create_claim(db, patient_id=patient_id)
     
-    # 4. Create the document record linked to the claim and patient
     doc_data = schemas.DocumentCreate(
         file_name=file.filename,
         file_path=file_path,
@@ -67,36 +47,26 @@ async def create_claim_from_upload(
     )
     new_document = crud_claim.create_document_for_claim(db, doc_data)
 
-    # 5. Add the AI processing to the background queue
-    background_tasks.add_task(process_claim_documents, new_claim.id, new_document.id)
-    logger.info(f"AI processing task added for claim_id: {new_claim.id}, doc_id: {new_document.id}")
+    logger.info(f"Dispatching claim processing task to Celery for claim_id: {new_claim.id}")
+    process_claim_documents.delay(str(new_claim.id), str(new_document.id))
     
     return new_claim
 
-# --- Payer Simulation Endpoints ---
-
 @router.post("/{claim_id}/simulate-denial", response_model=schemas.Claim)
-async def simulate_denial(
+async def simulate_denial( # <-- Can be async or sync, doesn't matter here
     claim_id: uuid.UUID,
-    background_tasks: BackgroundTasks,
+    # background_tasks: BackgroundTasks, # <-- REMOVED UNUSED DEPENDENCY
     db: Session = Depends(get_db)
 ):
     """
-    Simulates a payer denying a claim. This updates the claim status
-    and triggers a background task to perform AI denial analysis.
+    Simulates a payer denying a claim. This updates the claim status.
     """
     claim = crud_claim.get_claim(db, claim_id=claim_id)
     if not claim:
         raise HTTPException(status_code=404, detail="Claim not found")
         
-    # Update status immediately
     crud_claim.update_claim_status(db, claim=claim, status=ClaimStatus.denied)
     logger.info(f"Claim {claim_id} status updated to DENIED.")
-
-    # In a real system, you'd pass denial codes. Here we'll generate them.
-    # We'll create a simple background task for the analysis later if needed.
-    # For now, let's do a simple update to show the flow.
-    # background_tasks.add_task(llm_service.generate_denial_analysis, claim.id)
     
     return claim
 
@@ -128,6 +98,38 @@ def list_claims(
     """
     claims = crud_claim.get_claims(db, skip=skip, limit=limit)
     return claims
+
+@router.get("/{claim_id}/export/cms1500",
+    responses={
+        200: {
+            "content": {"application/pdf": {}},
+            "description": "A generated CMS-1500 PDF for the claim.",
+        }
+    },
+)
+def export_claim_as_cms1500(
+    claim_id: uuid.UUID,
+    db: Session = Depends(get_db)
+):
+    """
+    Generates and returns a CMS-1500 PDF for the specified claim.
+    """
+    # Eagerly load all relationships needed for the PDF
+    db_claim = db.query(models.Claim).options(
+        joinedload(models.Claim.patient),
+        joinedload(models.Claim.service_lines)
+    ).filter(models.Claim.id == claim_id).first()
+
+    if db_claim is None:
+        raise HTTPException(status_code=404, detail="Claim not found")
+
+    pdf_bytes = pdf_service.generate_cms1500_pdf(db_claim)
+    
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f"attachment; filename=claim_{claim_id}_cms1500.pdf"}
+    )
 
 @router.get("/{claim_id}", response_model=schemas.Claim)
 def read_claim(

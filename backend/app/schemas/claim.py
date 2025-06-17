@@ -5,6 +5,7 @@ from typing import List, Optional, Any
 
 from app.models.claim import ClaimStatus
 from .document import Document  # Import the Document schema
+from .service_line import ServiceLine
 
 # Shared properties
 class ClaimBase(BaseModel):
@@ -30,8 +31,6 @@ class ClaimInDB(ClaimBase):
     # --- NEW ---
     # Add the new fields to the API response
     eligibility_status: Optional[str] = None
-    assigned_cpt_codes: Optional[List[str]] = None
-    assigned_icd10_codes: Optional[List[str]] = None
     compliance_flags: Optional[Any] = None
 
     class Config:
@@ -41,3 +40,4 @@ class ClaimInDB(ClaimBase):
 # A full claim model for the detail view
 class Claim(ClaimInDB):
     documents: List[Document] = []
+    service_lines: List[ServiceLine] = []

@@ -1,5 +1,10 @@
 from fastapi import FastAPI
 import logging
+
+from app.db import base_class, session
+from app.models import *
+
+
 from app.api.api import api_router
 
 # Configure logging
