@@ -19,3 +19,6 @@ class Patient(Base):
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     claims = relationship("Claim", back_populates="patient")
+    # --- NEW ---
+    # Add a relationship to documents, so we can easily find a patient's policy docs
+    documents = relationship("Document", back_populates="patient", cascade="all, delete-orphan")

@@ -1,7 +1,8 @@
 import uuid
 from sqlalchemy import Column, String, Enum, DateTime, Numeric, ForeignKey
+# --- NEW ---
+from sqlalchemy.dialects.postgresql import UUID, ARRAY, JSONB
 from sqlalchemy.orm import relationship
-from sqlalchemy.dialects.postgresql import UUID
 from datetime import datetime
 import enum
 
@@ -25,6 +26,12 @@ class Claim(Base):
     total_amount = Column(Numeric(10, 2))
     date_of_service = Column(DateTime)
     status = Column(Enum(ClaimStatus), nullable=False, default=ClaimStatus.draft)
+    
+    # --- NEW FIELDS FOR ADVANCED DEMO ---
+    eligibility_status = Column(String(50), default='Unknown')
+    assigned_cpt_codes = Column(ARRAY(String))
+    assigned_icd10_codes = Column(ARRAY(String))
+    compliance_flags = Column(JSONB) # To store a list of warning objects
     
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)

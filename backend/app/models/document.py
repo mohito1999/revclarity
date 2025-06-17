@@ -10,11 +10,22 @@ class Document(Base):
     __tablename__ = "documents"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    claim_id = Column(UUID(as_uuid=True), ForeignKey("claims.id"), nullable=False)
+    # --- MODIFIED ---
+    # A document can belong to a claim OR a patient directly. So claim_id can be null.
+    claim_id = Column(UUID(as_uuid=True), ForeignKey("claims.id"), nullable=True)
+    patient_id = Column(UUID(as_uuid=True), ForeignKey("patients.id"), nullable=False)
+
     file_name = Column(String(255), nullable=False)
     file_path = Column(String(512), nullable=False)
-    document_type = Column(String(50))
+    
+    # --- MODIFIED ---
+    # Renamed document_type to be more specific, e.g., 'POLICY_DOC', 'CLAIM_FORM'
+    document_purpose = Column(String(50))
+    
     raw_text = Column(Text)
     uploaded_at = Column(DateTime, default=datetime.utcnow)
 
     claim = relationship("Claim", back_populates="documents")
+    # --- NEW ---
+    # Complete the link back to the Patient model
+    patient = relationship("Patient", back_populates="documents")

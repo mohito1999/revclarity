@@ -11,10 +11,7 @@ class Settings(BaseSettings):
     OPENAI_API_VERSION: Optional[str] = None
     AZURE_LLM_DEPLOYMENT_NAME: Optional[str] = None
 
-    # Azure Document Intelligence
-    DOC_INTEL_ENDPOINT: Optional[str] = None
-    DOC_INTEL_KEY: Optional[str] = None
-    DOC_INTEL_API_VERSION: Optional[str] = None
+    LLAMAPARSE_API_KEY: Optional[str] = None
 
     model_config = SettingsConfigDict(env_file=".env", extra='ignore', case_sensitive=False)
 
