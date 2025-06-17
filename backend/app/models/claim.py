@@ -1,6 +1,5 @@
 import uuid
 from sqlalchemy import Column, String, Enum, DateTime, Numeric, ForeignKey
-# --- NEW ---
 from sqlalchemy.dialects.postgresql import UUID, ARRAY, JSONB
 from sqlalchemy.orm import relationship
 from datetime import datetime
@@ -11,7 +10,7 @@ from app.db.base_class import Base
 class ClaimStatus(enum.Enum):
     draft = "draft"
     processing = "processing"
-    submitted = "submitted"
+    submitted = "submitted" # New status
     approved = "approved"
     denied = "denied"
     paid = "paid"
@@ -21,18 +20,23 @@ class Claim(Base):
     __tablename__ = "claims"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    patient_id = Column(UUID(as_uuid=True), ForeignKey("patients.id"), nullable=True)
+    patient_id = Column(UUID(as_uuid=True), ForeignKey("patients.id"), nullable=False) # Now required
     payer_name = Column(String(255))
     total_amount = Column(Numeric(10, 2))
     date_of_service = Column(DateTime)
     status = Column(Enum(ClaimStatus), nullable=False, default=ClaimStatus.draft)
     
-    # --- NEW FIELDS FOR ADVANCED DEMO ---
+    # --- AI & ELIGIBILITY FIELDS ---
     eligibility_status = Column(String(50), default='Unknown')
-    assigned_cpt_codes = Column(ARRAY(String))
-    assigned_icd10_codes = Column(ARRAY(String))
-    compliance_flags = Column(JSONB) # To store a list of warning objects
+    compliance_flags = Column(JSONB)
     
+    # --- LIFECYCLE & FINANCIAL FIELDS ---
+    submission_date = Column(DateTime)
+    adjudication_date = Column(DateTime)
+    patient_responsibility_amount = Column(Numeric(10, 2))
+    payer_paid_amount = Column(Numeric(10, 2))
+    edi_transaction_id = Column(String(255))
+
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 

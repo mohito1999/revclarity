@@ -1,86 +1,97 @@
 import logging
 import json
 from sqlalchemy.orm import Session
-import asyncio # Import asyncio
+import asyncio 
 
 from app.db.session import SessionLocal
+from app import models, schemas
 from app.crud import crud_claim
-from app.services import doc_intelligence_service, llm_service
+from app.services import parsing_service, llm_service
 from app.models.claim import ClaimStatus
 
 logger = logging.getLogger(__name__)
 
-# Make the function asynchronous
-async def process_claim_documents(claim_id: str):
+async def process_claim_documents(claim_id: str, document_id: str):
     """
-    The main background task to process a new claim.
-    1. Fetches claim and documents from DB.
-    2. Calls Document Intelligence for each document.
-    3. Calls OpenAI to structure the extracted data.
-    4. Updates the claim in the DB with the results.
+    The main background task to process a new claim. This is the orchestrator.
+    1. Fetches claim and primary document from DB.
+    2. Calls LlamaParse to get structured text from the document.
+    3. Runs the 3-step AI Assembly Line (Extract -> Code -> Comply).
+    4. Performs a simulated eligibility check.
+    5. Updates the claim in the DB with all the rich, new data.
     """
-    logger.info(f"Starting AI processing for claim_id: {claim_id}")
+    logger.info(f"Starting full AI processing for claim_id: {claim_id}")
     
     db: Session = SessionLocal()
     
     try:
+        # 1. Fetch data from DB
         claim = crud_claim.get_claim(db, claim_id)
         if not claim:
             logger.error(f"Claim {claim_id} not found in background task.")
             return
 
-        sample_doc_url = "https://github.com/Azure-Samples/cognitive-services-REST-api-samples/raw/master/curl/form-recognizer/rest-api/invoice.pdf"
-        logger.info(f"Using sample document URL for processing: {sample_doc_url}")
-
-        # 1. Analyze Document with Document Intelligence
-        # --- ADD AWAIT HERE ---
-        result_url = await doc_intelligence_service.analyze_document_from_url(doc_url=sample_doc_url, model_id="prebuilt-invoice")
-        # --- AND AWAIT HERE ---
-        analysis_result = await doc_intelligence_service.get_analysis_results(result_url)
+        primary_document = crud_claim.get_document(db, document_id)
+        if not primary_document:
+            logger.error(f"Primary document {document_id} for claim {claim_id} not found.")
+            return
         
-        full_text = analysis_result.get("content", "No content extracted.")
+        # 2. Call LlamaParse to get clean text
+        logger.info(f"Parsing document: {primary_document.file_path}")
+        markdown_text = await parsing_service.parse_document_async(primary_document.file_path)
         
-        # 2. Structure Data with OpenAI
-        if not llm_service.azure_llm_client:
-            raise ConnectionError("Azure LLM Client is not initialized.")
+        # 3. Run the AI Assembly Line
+        # Step 3a: Extract structured data
+        extracted_data = await llm_service.generate_structured_data(markdown_text)
+        logger.info(f"AI Step 1 (Extractor) Result: {extracted_data}")
 
-        system_prompt = """
-        You are an expert RCM data entry specialist. Based on the provided text from a medical document (like an invoice or EOB), extract the following information in a structured JSON format.
-        The JSON object must have these exact keys: 'payer_name', 'total_amount', 'date_of_service', 'suggested_cpt_codes', 'suggested_icd10_codes'.
-        - 'total_amount' should be a number.
-        - 'date_of_service' should be in 'YYYY-MM-DD' format.
-        - 'suggested_cpt_codes' and 'suggested_icd10_codes' should be arrays of strings.
-        If a value is not found, use a reasonable default or null.
-        """
+        # Step 3b: Generate medical codes
+        medical_codes = await llm_service.generate_medical_codes(markdown_text, extracted_data)
+        logger.info(f"AI Step 2 (Coder) Result: {medical_codes}")
+
+        # Step 3c: Check for compliance issues
+        compliance_flags = await llm_service.check_compliance(markdown_text, extracted_data, medical_codes)
+        logger.info(f"AI Step 3 (Compliance) Result: {compliance_flags}")
+
+        # 4. Perform simulated eligibility check
+        # In a real system, this would be a complex lookup. Here, we simulate it.
+        # For the demo, we'll just check if a "POLICY_DOC" exists for the patient.
+        eligibility_status = "Unknown"
+        if claim.patient_id:
+            policy_doc = crud_claim.find_document_by_purpose(db, patient_id=claim.patient_id, purpose='POLICY_DOC')
+            if policy_doc:
+                # We could even have the LLM read the policy doc, but for now, we'll assume its existence means active.
+                eligibility_status = "Active"
+                logger.info(f"Policy document found for patient {claim.patient_id}. Setting eligibility to Active.")
+            else:
+                eligibility_status = "Inactive - No Policy on File"
+                logger.info(f"No policy document found for patient {claim.patient_id}. Setting eligibility to Inactive.")
         
-        user_prompt = f"Here is the document text:\n\n{full_text}"
-
-        # --- AND AWAIT HERE ---
-        chat_completion = await llm_service.azure_llm_client.chat.completions.create(
-            model=llm_service.settings.AZURE_LLM_DEPLOYMENT_NAME,
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt}
-            ],
-            response_format={"type": "json_object"}
+        # 5. Update the claim in the database with all the new data
+        update_data = schemas.ClaimUpdate(
+            payer_name=extracted_data.get("payer_name"),
+            total_amount=extracted_data.get("total_amount"),
+            date_of_service=extracted_data.get("date_of_service")
         )
-        
-        response_content = chat_completion.choices[0].message.content
-        extracted_data = json.loads(response_content)
-        logger.info(f"LLM extracted data: {extracted_data}")
 
-        # 3. Update the Claim in the DB
-        claim.payer_name = extracted_data.get("payer_name")
-        claim.total_amount = extracted_data.get("total_amount")
-        claim.date_of_service = extracted_data.get("date_of_service")
-        
-        crud_claim.update_claim_status(db, claim, ClaimStatus.draft)
+        # Use a new, more powerful CRUD function to update everything at once
+        crud_claim.update_claim_with_ai_results(
+            db=db,
+            claim=claim,
+            update_data=update_data,
+            status=ClaimStatus.draft,
+            eligibility_status=eligibility_status,
+            cpt_codes=medical_codes.get("suggested_cpt_codes", []),
+            icd10_codes=medical_codes.get("suggested_icd10_codes", []),
+            compliance_flags=compliance_flags
+        )
         
         logger.info(f"Successfully processed and updated claim {claim_id}. Status set to 'draft'.")
 
     except Exception as e:
         logger.error(f"Error processing claim {claim_id}: {e}", exc_info=True)
         if 'claim' in locals() and claim:
+            # If anything fails, mark the claim as denied for manual review
             crud_claim.update_claim_status(db, claim, ClaimStatus.denied)
     finally:
         db.close()

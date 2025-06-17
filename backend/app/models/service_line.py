@@ -16,6 +16,9 @@ class ServiceLine(Base):
     units = Column(Integer)
     charge = Column(Numeric(10, 2))
     ai_suggestion_source = Column(Text)
-    confidence_score = Column(Numeric(3, 2))
+    
+    # --- MODIFIED ---
+    # Renamed for clarity and changed type
+    code_confidence_score = Column(Numeric(5, 4)) # e.g., 0.9850 for 98.5%
 
     claim = relationship("Claim", back_populates="service_lines")
