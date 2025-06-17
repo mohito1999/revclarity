@@ -74,8 +74,7 @@ def update_claim_with_ai_results(
     update_data: schemas.ClaimUpdate,
     status: models.ClaimStatus,
     eligibility_status: str,
-    cpt_codes: List[str],
-    icd10_codes: List[str],
+    patient_responsibility: float, # <-- New
     compliance_flags: List[dict]
 ) -> models.Claim:
     """
@@ -86,14 +85,36 @@ def update_claim_with_ai_results(
     for field, value in claim_data.items():
         setattr(claim, field, value)
         
-    # Update AI-specific fields
+    # Update AI-specific and financial fields
     claim.status = status
     claim.eligibility_status = eligibility_status
-    claim.assigned_cpt_codes = cpt_codes
-    claim.assigned_icd10_codes = icd10_codes
+    claim.patient_responsibility_amount = patient_responsibility # <-- New
     claim.compliance_flags = compliance_flags
     
     db.add(claim)
     db.commit()
     db.refresh(claim)
     return claim
+
+def create_service_lines_for_claim(db: Session, claim_id: uuid.UUID, validated_codes: dict, confidence_scores: dict):
+    """
+    Creates service line records for a claim based on validated codes.
+    """
+    # First, clear any existing service lines for this claim to prevent duplicates
+    db.query(models.ServiceLine).filter(models.ServiceLine.claim_id == claim_id).delete()
+
+    service_lines_to_add = []
+    
+    # For CPT codes
+    for cpt_item in validated_codes.get('cpt_codes', []):
+        cpt_code = cpt_item['code']
+        sl = models.ServiceLine(
+            claim_id=claim_id,
+            cpt_code=cpt_code,
+            # In a real system, we'd also link the relevant ICD codes here
+            code_confidence_score=confidence_scores.get(cpt_code, 0.0)
+        )
+        service_lines_to_add.append(sl)
+
+    db.bulk_save_objects(service_lines_to_add)
+    db.commit()

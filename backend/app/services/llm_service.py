@@ -81,34 +81,35 @@ async def generate_medical_codes(markdown_text: str, extracted_data: Dict[str, A
 
 
 # --- AI Assembly Line Step 3: Compliance Officer ---
-async def check_compliance(markdown_text: str, extracted_data: Dict[str, Any], medical_codes: Dict[str, List[str]]) -> List[Dict[str, str]]:
+async def check_compliance_and_refine(markdown_text: str, extracted_data: Dict[str, Any], validated_codes: Dict[str, List[Dict]]) -> Dict[str, Any]:
     """
-    Acts as a claim scrubber, checking for potential issues and flagging them.
+    Acts as a claim scrubber and refiner.
+    1. Checks for compliance issues (e.g., payer rules).
+    2. Assigns a confidence score to each validated code.
+    3. Returns a dictionary with compliance flags and confidence scores.
     """
-    logger.info("AI Step 3: Checking for compliance flags.")
+    logger.info("AI Step 3: Checking compliance and refining codes.")
     system_prompt = """
-    You are an AI RCM Compliance Officer. Your job is to "scrub" a claim by flagging potential issues.
-    Based on all the provided information, identify potential problems.
-    Return a JSON object containing a single key "compliance_flags". This key should hold an array of objects.
-    Each object in the array represents a single flag and MUST have two keys: 'level' (e.g., 'Warning', 'Error') and 'message' (a clear description of the issue).
+    You are an AI RCM Compliance Officer and Quality Analyst. Your job is to perform a final review of a claim.
+    Based on all the provided information, you must perform two tasks:
+    1.  **Compliance Check:** Identify potential problems or payer-specific rules. For example, if the payer is 'HealthFirst Insurance', flag if a modifier 25 is missing for an office visit with a procedure.
+    2.  **Confidence Scoring:** For each provided CPT and ICD-10 code, assign a confidence score (from 0.0 to 1.0) based on how well the code's official description matches the original document text.
+
+    Return a JSON object with two keys:
+    1.  `"compliance_flags"`: An array of objects, where each object has 'level' ('Warning' or 'Error') and 'message'.
+    2.  `"confidence_scores"`: A dictionary where keys are the code strings (e.g., "99214") and values are the confidence scores (e.g., 0.98).
     
-    Example issues to look for:
-    - Missing patient or payer information.
-    - A CPT code that typically requires a modifier but none is present.
-    - A potential mismatch between diagnosis (ICD-10) and procedure (CPT).
-    
-    If no issues are found, return an empty array for "compliance_flags".
+    If no compliance issues are found, return an empty array for "compliance_flags".
     """
+    
     user_prompt = (
-        f"Please scrub the following claim information.\n\n"
+        f"Please review the following claim information.\n\n"
         f"Extracted Data:\n{json.dumps(extracted_data, indent=2)}\n\n"
-        f"Suggested Codes:\n{json.dumps(medical_codes, indent=2)}\n\n"
+        f"Pre-Validated Codes with Official Descriptions:\n{json.dumps(validated_codes, indent=2)}\n\n"
         f"Full Document Text:\n{markdown_text}"
     )
     
-    # We call the helper but expect a dict with one key, so we extract the list.
-    response_dict = await _call_llm_with_json_response(system_prompt, user_prompt)
-    return response_dict.get("compliance_flags", [])
+    return await _call_llm_with_json_response(system_prompt, user_prompt)
 
 # --- Denial Management Function (from before, can be refined later) ---
 async def generate_denial_analysis(claim_data: dict) -> dict:
