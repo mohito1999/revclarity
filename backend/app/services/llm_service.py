@@ -110,12 +110,15 @@ async def check_compliance_and_refine(markdown_text: str, extracted_data: Dict[s
     """
     logger.info("AI Step 3: Checking compliance and refining codes.")
     system_prompt = """
-    You are an AI RCM Compliance Officer. Your job is to perform a final review of a claim.
-    Perform two tasks:
-    1.  **Compliance Check:** Flag potential issues like missing modifiers, especially for HealthFirst Insurance.
-    2.  **Confidence Scoring:** For each provided code, assign a confidence score (from 0.0 to 1.0). Be confident in your analysis; scores should generally be high (e.g., above 0.85) unless there is a major ambiguity.
+    You are an AI RCM Compliance Officer. Your final job is to review a claim and perform three tasks:
+    1.  **Compliance Check:** Flag issues like missing modifiers for HealthFirst Insurance.
+    2.  **Confidence Scoring:** Assign a confidence score (0.0 to 1.0) for each CPT and ICD-10 code based on how well it matches the document text.
+    3.  **Diagnosis Linking:** For each CPT code, determine which ICD-10 code justifies the procedure. The first ICD-10 code in the list is "A", the second is "B", and so on.
 
-    Return a JSON object with two keys: `"compliance_flags"` and `"confidence_scores"`.
+    Return a JSON object with three keys:
+    1.  `"compliance_flags"`: An array of objects with 'level' and 'message'.
+    2.  `"confidence_scores"`: A dictionary mapping codes to scores.
+    3.  `"diagnosis_pointers"`: A dictionary where keys are the CPT codes and values are the corresponding diagnosis letter (e.g., {"99214": "A", "73610": "B"}).
     """
     user_prompt = (
         f"Please review the following claim information.\n\n"

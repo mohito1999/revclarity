@@ -4,6 +4,8 @@ from sqlalchemy import func, cast, Text
 from typing import List, Dict
 from app.models import MedicalCode
 import logging
+from sqlalchemy import or_, and_
+
 
 logger = logging.getLogger(__name__)
 
@@ -47,19 +49,20 @@ def validate_codes(db: Session, suggested_codes: Dict[str, List[str]]) -> Dict[s
 def search_icd10_codes_by_description(db: Session, search_terms: List[str]) -> List[Dict[str, str]]:
     """
     Searches for ICD-10 codes in the database using descriptive terms.
+    (CORRECTED QUERY LOGIC)
     """
     if not search_terms:
         return []
     
-    # This creates a query like: SELECT * FROM medical_codes WHERE description ILIKE '%term1%' OR description ILIKE '%term2%'
-    # It's a simplified but effective search for the demo.
-    from sqlalchemy import or_
-    
+    # Create a list of ILIKE conditions for each search term
     search_filters = [MedicalCode.description.ilike(f"%{term}%") for term in search_terms]
     
+    # --- THE FIX: Explicitly combine the code_type and the OR conditions with AND ---
     results = db.query(MedicalCode).filter(
-        MedicalCode.code_type == 'ICD-10',
-        or_(*search_filters)
-    ).limit(5).all() # Limit to 5 to avoid too many results
+        and_(
+            MedicalCode.code_type == 'ICD-10',
+            or_(*search_filters)
+        )
+    ).limit(100).all() # Increased limit to 10 to give the final LLM more options
 
     return [{"code": code.code_value, "description": code.description} for code in results]

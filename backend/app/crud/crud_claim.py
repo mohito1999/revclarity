@@ -96,23 +96,45 @@ def update_claim_with_ai_results(
     db.refresh(claim)
     return claim
 
-def create_service_lines_for_claim(db: Session, claim_id: uuid.UUID, validated_codes: dict, confidence_scores: dict):
+def create_service_lines_for_claim(db: Session, claim_id: uuid.UUID, validated_codes: dict, confidence_scores: dict, diagnosis_pointers: dict): # <-- Add diagnosis_pointers
     """
-    Creates service line records for a claim based on validated codes.
+    Creates service line records for a claim, including all codes, charges, and pointers.
     """
-    # First, clear any existing service lines for this claim to prevent duplicates
     db.query(models.ServiceLine).filter(models.ServiceLine.claim_id == claim_id).delete()
 
     service_lines_to_add = []
     
-    # For CPT codes
+    # Get all the final ICD-10 codes ready
+    final_icd10_codes = [item['code'] for item in validated_codes.get('icd10_codes', [])]
+    
+    # For each CPT code, create a service line
     for cpt_item in validated_codes.get('cpt_codes', []):
         cpt_code = cpt_item['code']
+        
+        charge_amount = 0.0
+        if cpt_code == '99214': charge_amount = 150.00
+        elif cpt_code == '73610': charge_amount = 180.00
+
+        # --- THE FINAL FIX ---
+        # Get the diagnosis pointer for this CPT code. It will be a letter like "A" or "B".
+        pointer_letter = diagnosis_pointers.get(cpt_code)
+        # Convert the letter to an index (A=0, B=1, etc.)
+        pointer_index = ord(pointer_letter.upper()) - 65 if pointer_letter else -1
+
+        # Select the specific ICD-10 code pointed to, or all if no specific pointer.
+        linked_icd_codes = []
+        if 0 <= pointer_index < len(final_icd10_codes):
+            linked_icd_codes = [final_icd10_codes[pointer_index]]
+        else:
+            linked_icd_codes = final_icd10_codes # Default to linking all if pointer is invalid
+
         sl = models.ServiceLine(
             claim_id=claim_id,
             cpt_code=cpt_code,
-            # In a real system, we'd also link the relevant ICD codes here
-            code_confidence_score=confidence_scores.get(cpt_code, 0.0)
+            icd10_codes=linked_icd_codes, # <-- Use the linked codes
+            charge=charge_amount,
+            code_confidence_score=confidence_scores.get(cpt_code),
+            diagnosis_pointer=pointer_letter
         )
         service_lines_to_add.append(sl)
 

@@ -137,7 +137,8 @@ def process_claim_documents(claim_id_str: str, document_id_str: str):
         
         crud_claim.create_service_lines_for_claim(
             db=db, claim_id=claim.id, validated_codes=validated_codes,
-            confidence_scores=compliance_and_confidence.get("confidence_scores", {})
+            confidence_scores=compliance_and_confidence.get("confidence_scores", {}),
+            diagnosis_pointers=compliance_and_confidence.get("diagnosis_pointers", {})
         )
 
         logger.info(f"Successfully processed and updated claim {claim_id}. Status set to 'draft'.")
