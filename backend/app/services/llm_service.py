@@ -79,48 +79,50 @@ async def synthesize_and_extract_claim_data(
     1.  **Synthesize:** Carefully read all provided documents. Information for one field might be spread across multiple sources. Choose the most accurate and specific value.
     2.  **Strict JSON Format:** The JSON object you return MUST conform EXACTLY to the structure below.
     3.  **Handle Missing Data:** If a value for a specific key cannot be found, you MUST use `null`.
+    4.  **NEW INFERENCE RULE:** If the document indicates the patient is the primary subscriber, you MUST populate both `patient_address` and `insured_address` with the same address.
 
     **JSON Schema:**
     {
-      "insurance_type": "string",
-      "insured_id_number": "string",
-      "patient_name": "string",
-      "patient_dob": "date (YYYY-MM-DD)",
-      "patient_sex": "string (M or F)",
-      "insured_name": "string",
-      "patient_address": "string",
-      "patient_city": "string",
-      "patient_state": "string",
-      "patient_zip": "string",
-      "patient_phone": "string",
-      "patient_relationship_to_insured": "string",
-      "insured_address": "string",
-      "is_condition_related_to_employment": "boolean",
-      "is_condition_related_to_auto_accident": "boolean",
-      "is_condition_related_to_other_accident": "boolean",
-      "insured_policy_group_or_feca_number": "string",
-      "date_of_current_illness": "date (YYYY-MM-DD)",
-      "referring_provider_name": "string",
-      "referring_provider_npi": "string",
-      "prior_authorization_number": "string",
-      "federal_tax_id_number": "string",
-      "patient_account_no": "string",
-      "accept_assignment": "boolean",
-      "total_charge_amount": "number",
-      "amount_paid_by_patient": "number",
-      "service_facility_location_info": "string",
-      "billing_provider_info": "string",
-      "billing_provider_npi": "string",
-      "payer_name": "string",
-      "date_of_service": "date (YYYY-MM-DD)",
-      "service_lines": [
+    "insurance_type": "string",
+    "insured_id_number": "string",
+    "patient_name": "string",
+    "patient_dob": "date (YYYY-MM-DD)",
+    "patient_sex": "string (M or F, convert 'Female' to F and 'Male' to M)", 
+    "insured_name": "string",
+    "patient_address": "string",
+    "patient_city": "string",
+    "patient_state": "string",
+    "patient_zip": "string",
+    "patient_phone": "string",
+    "patient_relationship_to_insured": "string",
+    "insured_address": "string", 
+    "is_condition_related_to_employment": "boolean",
+    "is_condition_related_to_auto_accident": "boolean",
+    "is_condition_related_to_other_accident": "boolean",
+    "insured_policy_group_or_feca_number": "string",
+    "date_of_current_illness": "date (YYYY-MM-DD)",
+    "referring_provider_name": "string",
+    "referring_provider_npi": "string",
+    "prior_authorization_number": "string",
+    "federal_tax_id_number": "string",
+    "patient_account_no": "string",
+    "accept_assignment": "boolean",
+    "total_charge_amount": "number",
+    "amount_paid_by_patient": "number",
+    "service_facility_location_info": "string",
+    "billing_provider_info": "string",
+    "billing_provider_npi": "string",
+    "payer_name": "string",
+    "date_of_service": "date (YYYY-MM-DD)",
+    "service_lines": [
         {
-          "cpt_code": "string (The 5-digit code, e.g., '99214')",
-          "charge_amount": "number"
+        "cpt_code": "string (The 5-digit code, e.g., '99214')",
+        "charge_amount": "number"
         }
-      ]
+    ]
     }
     """
+
 
     # Combine all document texts into a single prompt
     user_prompt_parts = []
