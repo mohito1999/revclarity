@@ -21,6 +21,6 @@ class ServiceLine(Base):
     # --- MODIFIED ---
     # Renamed for clarity and changed type
     code_confidence_score = Column(Numeric(5, 4)) # e.g., 0.9850 for 98.5%
-    diagnosis_pointer: Optional[str] = Column(String(2))
+    diagnosis_pointer = Column(String(10), nullable=True)
 
     claim = relationship("Claim", back_populates="service_lines")

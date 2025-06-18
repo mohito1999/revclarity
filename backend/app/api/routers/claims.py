@@ -8,7 +8,7 @@ from fastapi.responses import Response
 from app import models, schemas
 from app.api.deps import get_db
 from app.crud import crud_claim, crud_patient
-from app.tasks import process_claim_documents
+from app.tasks import process_claim_creation
 from app.models.claim import ClaimStatus
 from app.utils.file_handling import save_upload_file
 from app.services import pdf_service
@@ -23,32 +23,41 @@ logger = logging.getLogger(__name__)
 @router.post("/upload", response_model=schemas.Claim, status_code=201)
 def create_claim_from_upload(
     patient_id: uuid.UUID = Form(...),
-    file: UploadFile = File(...),
+    files: List[UploadFile] = File(...), # <-- Now accepts multiple files
     db: Session = Depends(get_db)
 ):
     """
-    The primary endpoint to initiate a new claim.
-    Dispatches a task to the Celery queue for AI processing.
+    The primary endpoint to initiate a new claim from multiple documents.
+    Dispatches a single task to the Celery queue for full processing.
     """
     patient = crud_patient.get_patient(db, patient_id=patient_id)
     if not patient:
         raise HTTPException(status_code=404, detail=f"Patient with id {patient_id} not found.")
 
-    file_path = save_upload_file(file)
-    
+    # Create a placeholder claim first
     new_claim = crud_claim.create_claim(db, patient_id=patient_id)
-    
-    doc_data = schemas.DocumentCreate(
-        file_name=file.filename,
-        file_path=file_path,
-        patient_id=patient_id,
-        claim_id=new_claim.id,
-        document_purpose='CLAIM_FORM'
-    )
-    new_document = crud_claim.create_document_for_claim(db, doc_data)
 
-    logger.info(f"Dispatching claim processing task to Celery for claim_id: {new_claim.id}")
-    process_claim_documents.delay(str(new_claim.id), str(new_document.id))
+    # Save all uploaded files and associate them with the new claim
+    for file in files:
+        file_path = save_upload_file(file)
+        
+        # Infer purpose from filename for the demo
+        purpose = "UNKNOWN"
+        if "intake" in file.filename.lower(): purpose = "PATIENT_INTAKE"
+        if "policy" in file.filename.lower(): purpose = "POLICY_DOC"
+        if "encounter" in file.filename.lower(): purpose = "ENCOUNTER_NOTE"
+        
+        doc_data = schemas.DocumentCreate(
+            file_name=file.filename, file_path=file_path,
+            patient_id=patient_id, claim_id=new_claim.id,
+            document_purpose=purpose
+        )
+        crud_claim.create_document_for_claim(db, doc_data)
+
+    # Dispatch a SINGLE task with just the claim_id.
+    # The task itself is now smart enough to find all its own documents.
+    logger.info(f"Dispatching comprehensive claim creation task to Celery for claim_id: {new_claim.id}")
+    process_claim_creation.delay(str(new_claim.id))
     
     return new_claim
 
