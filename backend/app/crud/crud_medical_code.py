@@ -12,25 +12,25 @@ logger = logging.getLogger(__name__)
 def validate_codes(db: Session, suggested_codes: Dict[str, List[str]]) -> Dict[str, List[Dict[str, str]]]:
     """
     Takes a dictionary of suggested codes. Validates them against the DB.
-    For CPT codes, if not found, it will trust the AI's suggestion for the demo.
-    (FINAL, HARDENED VERSION)
+    (FINAL, NORMALIZED VERSION)
     """
     validated_output = { "cpt_codes": [], "icd10_codes": [] }
     
-    # --- THE FIX: Enforce string type for all codes ---
-    cpt_suggestions = [str(code) for code in suggested_codes.get("suggested_cpt_codes", [])]
-    icd10_suggestions = [str(code) for code in suggested_codes.get("suggested_icd10_codes", [])]
-    all_suggested_codes = cpt_suggestions + icd10_suggestions
-    # --- END FIX ---
+    # --- THE FIX: Normalize ALL incoming codes before doing anything else ---
+    # This ensures we handle "Z00.00" vs "Z0000" and other inconsistencies.
+    cpt_suggestions = [str(code).strip() for code in suggested_codes.get("suggested_cpt_codes", [])]
+    icd10_suggestions = [str(code).replace('.', '').strip() for code in suggested_codes.get("suggested_icd10_codes", [])]
     
-    if not all_suggested_codes:
+    all_codes_to_check = cpt_suggestions + icd10_suggestions
+    
+    if not all_codes_to_check:
         return validated_output
 
-    db_results = db.query(MedicalCode).filter(MedicalCode.code_value.in_(all_suggested_codes)).all()
+    db_results = db.query(MedicalCode).filter(MedicalCode.code_value.in_(all_codes_to_check)).all()
     code_map = {code.code_value: code for code in db_results}
-    logger.info(f"Found {len(db_results)} matching codes in the database out of {len(all_suggested_codes)} suggestions.")
+    logger.info(f"Found {len(db_results)} matching codes in the database out of {len(all_codes_to_check)} suggestions.")
 
-    # UPDATED CPT LOGIC to use the clean list
+    # CPT Logic (no change needed here, but uses the normalized list)
     for code_val in cpt_suggestions:
         if code_val in code_map:
             db_code = code_map[code_val]
@@ -39,13 +39,13 @@ def validate_codes(db: Session, suggested_codes: Dict[str, List[str]]) -> Dict[s
             logger.warning(f"CPT code {code_val} not found in DB. Using AI suggestion directly for demo.")
             validated_output["cpt_codes"].append({"code": code_val, "description": "AI Suggested Code (Unverified)"})
 
-    # UPDATED ICD-10 logic to use the clean list
+    # ICD-10 Logic (uses the normalized list)
     for code_val in icd10_suggestions:
         if code_val in code_map:
             db_code = code_map[code_val]
             validated_output["icd10_codes"].append({"code": db_code.code_value, "description": db_code.description})
         else:
-            logger.error(f"ICD-10 code {code_val} suggested by AI but not found in DB. Discarding.")
+            logger.error(f"ICD-10 code {code_val} was not found in DB after normalization. Discarding.")
             
     return validated_output
 

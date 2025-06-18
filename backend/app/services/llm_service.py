@@ -119,12 +119,12 @@ async def generate_medical_codes(markdown_text: str, extracted_data: Dict[str, A
     logger.info("AI Step 2a: Generating CPT codes and ICD-10 search terms.")
     system_prompt = """
     You are an expert AI Medical Coder. Based on the provided text, perform two tasks:
-    1.  **Extract ICD-10 Search Terms:** From the 'CLINICAL NOTES' or 'Encounter Note' section, identify all key clinical terms, diagnoses, and symptoms. Be comprehensive.
-    2.  **Suggest CPT Codes:** Based on the 'SERVICES RENDERED' or 'Encounter Note' section, infer the most likely CPT codes. You are an expert; make an educated guess.
+    1.  **Extract ICD-10 Search Terms:** ...
+    2.  **Suggest CPT Codes:** Based on the 'SERVICES RENDERED' section, infer the most likely CPT codes. **Your output for CPT codes MUST be an array of 5-digit strings. DO NOT return descriptive text.**
 
     Return a JSON object with two keys:
-    1.  `"icd10_search_terms"`: An array of strings (e.g., ["right ankle pain", "fall from stairs", "suspected fracture"]).
-    2.  `"suggested_cpt_codes"`: An array of strings (e.g., ["99214", "73610"]).
+    1.  `"icd10_search_terms"`: An array of strings.
+    2.  `"suggested_cpt_codes"`: An array of 5-digit strings (e.g., ["99396", "36415"]).
     """
     user_prompt = f"Here is the document text:\n\n{markdown_text}\n\nAnd here is the initially extracted data for context:\n\n{json.dumps(extracted_data, indent=2)}"
     return await _call_llm_with_json_response(system_prompt, user_prompt)
@@ -137,14 +137,16 @@ async def select_final_icd10_codes(markdown_text: str, candidate_codes: List[Dic
     """
     logger.info("AI Step 2c: Selecting final ICD-10 codes from candidates.")
     system_prompt = """
-    You are an expert AI Medical Coder. You will be given the original physician's notes and a list of
-    candidate ICD-10 codes retrieved from a database. Your job is to review the candidates and select
-    the one or two codes that are MOST appropriate and relevant to the text.
+    You are a selection filter. Your only job is to select items from a provided list.
+    You will be given "Original Text" and a "Candidate Code List".
+    You MUST review the "Candidate Code List" and select the codes that are most relevant to the "Original Text".
     
-    **You MUST select at least one code if candidates are provided.** Choose the best fit, even if it's not perfect.
+    CRITICAL RULE: Your selection MUST ONLY contain codes that are present in the "Candidate Code List". DO NOT invent, create, or modify any codes.
+    
+    **CRITICAL FALLBACK RULE: If you review the candidates and find that none are a perfect match, you MUST select the SINGLE most plausible code from the list. DO NOT return an empty list if candidates are available.**
     
     Return a JSON object with a single key: `"selected_icd10_codes"`.
-    This key should hold an array of strings, containing only the code values of your selection.
+    This key should hold an array of strings, containing only the code values from the "Candidate Code List" that you have selected.
     """
     user_prompt = (
         f"Original Document Text:\n{markdown_text}\n\n"
@@ -180,16 +182,74 @@ async def check_compliance_and_refine(markdown_text: str, extracted_data: Dict[s
     )
     return await _call_llm_with_json_response(system_prompt, user_prompt)
 
-# --- Denial Management Function ---
-async def generate_denial_analysis(claim_data: dict, denial_reason: str) -> dict:
+# --- NEW: AI Assembly Line Step 4: Modifier Applier ---
+async def apply_modifiers(cpt_codes: List[str], compliance_flags: List[Dict]) -> List[str]:
     """
-    Generates a plausible denial reason, root cause, and recommended action for a given claim.
+    Takes a list of CPT codes and compliance flags, and returns a new list
+    of CPT codes with the necessary modifiers applied.
     """
-    logger.info("Generating denial analysis.")
+    logger.info("AI Step 4: Applying necessary modifiers.")
+    
     system_prompt = """
-    You are an expert RCM denial management assistant. Based on the provided claim data and a denial reason,
-    generate a plausible root cause and a detailed recommended action plan.
-    Return a JSON object with two keys: 'root_cause' and 'recommended_action'.
+    You are an expert billing specialist. You will be given a list of CPT codes and a list of compliance warnings.
+    Your job is to correct the CPT codes by appending the necessary modifiers based on the warnings.
+    
+    For example, if a warning says "Modifier 25 is missing for CPT 99214", you should append "-25" to that code.
+    
+    Return a JSON object with a single key, "modified_cpt_codes", which is an array of the final, corrected CPT code strings
+    (e.g., ["99214-25", "73610"]). The array should contain ALL original codes, modified or not.
     """
-    user_prompt = f"Denial Reason: '{denial_reason}'\n\nClaim Data: {json.dumps(claim_data, indent=2)}"
+    
+    user_prompt = (
+        f"Original CPT Codes: {json.dumps(cpt_codes, indent=2)}\n\n"
+        f"Compliance Flags to address:\n{json.dumps(compliance_flags, indent=2)}\n\n"
+        f"Please return the corrected list of CPT codes."
+    )
+    
+    response_dict = await _call_llm_with_json_response(system_prompt, user_prompt)
+    return response_dict.get("modified_cpt_codes", cpt_codes) # Return original codes if AI fails
+
+# --- NEW: AI Payer Adjudicator ---
+async def adjudicate_claim_as_payer(claim_data: Dict, policy_text: str) -> Dict[str, Any]:
+    """
+    Simulates a payer adjudicating a claim against a policy.
+    Decides to Approve or Deny and provides rationale.
+    """
+    logger.info("AI Payer: Adjudicating claim against policy.")
+
+    system_prompt = """
+    You are an expert claims adjudicator for HealthFirst Insurance. You will be given a submitted claim (as JSON) and the full text of the member's policy document. Your job is to review the claim **against the policy** and make a decision.
+
+    **Instructions:**
+    1.  **Review the Claim & Policy:** Compare the services rendered (CPT codes) on the claim against the 'COVERAGE DETAILS' in the policy document. Check for coverage, co-pays, deductibles, and prior authorization requirements.
+    2.  **Make a Decision:** Your decision must be either 'approved' or 'denied'.
+        -   **Deny** if a service's CPT code is explicitly listed as excluded, or if a required `prior_authorization_number` is missing for a service that needs it (like an MRI).
+        -   **Approve** in all other cases.
+    3.  **Provide Rationale (based on your decision):**
+        -   **If Denied:** You MUST provide a `denial_reason` (a short, official-sounding reason), a `root_cause` (the internal explanation), and a `recommended_action` (what the provider should do next).
+        -   **If Approved:** You MUST calculate the `payer_paid_amount`. The formula is: (Total Charges - Co-Pay) * Coverage Percentage. You MUST also confirm the `patient_responsibility_amount` (usually the co-pay).
+    4.  **Return JSON:** Your entire response must be a single JSON object with the following structure.
+
+    **JSON Structure for Approval:**
+    {
+      "decision": "approved",
+      "payer_paid_amount": 275.00,
+      "patient_responsibility_amount": 25.00
+    }
+
+    **JSON Structure for Denial:**
+    {
+      "decision": "denied",
+      "denial_reason": "Service requires prior authorization.",
+      "root_cause": "Claim was submitted for an MRI without a PA number in Box 23.",
+      "recommended_action": "Obtain prior authorization and resubmit the claim with the PA number."
+    }
+    """
+
+    user_prompt = (
+        f"Please adjudicate the following claim.\n\n"
+        f"--- SUBMITTED CLAIM DATA ---\n{json.dumps(claim_data, indent=2, default=str)}\n\n"
+        f"--- MEMBER POLICY DOCUMENT ---\n{policy_text}"
+    )
+
     return await _call_llm_with_json_response(system_prompt, user_prompt)

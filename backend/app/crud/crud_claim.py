@@ -15,6 +15,17 @@ def get_claim(db: Session, claim_id: uuid.UUID) -> Optional[models.Claim]:
         joinedload(models.Claim.patient).joinedload(models.Patient.documents)
     ).filter(models.Claim.id == claim_id).first()
 
+# --- NEW: A more comprehensive GET for adjudication ---
+def get_claim_for_adjudication(db: Session, claim_id: uuid.UUID) -> Optional[models.Claim]:
+    """
+    Retrieves a single claim by its ID, eagerly loading all relationships
+    needed for the adjudication process.
+    """
+    return db.query(models.Claim).options(
+        joinedload(models.Claim.patient).joinedload(models.Patient.documents),
+        joinedload(models.Claim.service_lines)
+    ).filter(models.Claim.id == claim_id).first()
+
 def get_claims(db: Session, skip: int = 0, limit: int = 100) -> List[models.Claim]:
     """
     Retrieves a list of claims with pagination.
@@ -79,6 +90,23 @@ def update_claim(db: Session, claim_id: uuid.UUID, claim_in: schemas.ClaimUpdate
         return None
         
     update_data = claim_in.model_dump(exclude_unset=True)
+    for field, value in update_data.items():
+        setattr(db_claim, field, value)
+        
+    db.add(db_claim)
+    db.commit()
+    db.refresh(db_claim)
+    return db_claim
+
+# --- NEW: A specific function to save adjudication results ---
+def update_claim_adjudication(db: Session, claim_id: uuid.UUID, update_data: dict) -> models.Claim:
+    """
+    Updates a claim with the results of the adjudication process.
+    """
+    db_claim = get_claim(db, claim_id)
+    if not db_claim:
+        return None
+        
     for field, value in update_data.items():
         setattr(db_claim, field, value)
         

@@ -8,10 +8,12 @@ from fastapi.responses import Response
 from app import models, schemas
 from app.api.deps import get_db
 from app.crud import crud_claim, crud_patient
-from app.tasks import process_claim_creation
+from app.tasks import process_claim_creation, process_adjudication
 from app.models.claim import ClaimStatus
 from app.utils.file_handling import save_upload_file
 from app.services import pdf_service
+import datetime
+from datetime import datetime, timezone
 
 router = APIRouter(
     prefix="/claims",
@@ -35,7 +37,11 @@ def create_claim_from_upload(
         raise HTTPException(status_code=404, detail=f"Patient with id {patient_id} not found.")
 
     # Create a placeholder claim first
+     # --- NEW LOGIC: We now create the claim in 'processing' status
+    # and will update it to 'draft' only after the full pipeline succeeds.
     new_claim = crud_claim.create_claim(db, patient_id=patient_id)
+    new_claim.status = models.claim.ClaimStatus.processing
+    db.commit()
 
     # Save all uploaded files and associate them with the new claim
     for file in files:
@@ -61,40 +67,32 @@ def create_claim_from_upload(
     
     return new_claim
 
-@router.post("/{claim_id}/simulate-denial", response_model=schemas.Claim)
-async def simulate_denial( # <-- Can be async or sync, doesn't matter here
+@router.post("/{claim_id}/simulate-outcome", response_model=schemas.Claim)
+def simulate_claim_outcome(
     claim_id: uuid.UUID,
-    # background_tasks: BackgroundTasks, # <-- REMOVED UNUSED DEPENDENCY
     db: Session = Depends(get_db)
 ):
     """
-    Simulates a payer denying a claim. This updates the claim status.
+    Submits the claim and simulates a payer outcome.
+    This triggers the AI Adjudicator to make a decision.
     """
     claim = crud_claim.get_claim(db, claim_id=claim_id)
     if not claim:
         raise HTTPException(status_code=404, detail="Claim not found")
-        
-    crud_claim.update_claim_status(db, claim=claim, status=ClaimStatus.denied)
-    logger.info(f"Claim {claim_id} status updated to DENIED.")
     
-    return claim
+    # 1. Update the claim status to "submitted" to reflect the action
+    claim.status = models.claim.ClaimStatus.submitted
+    claim.submission_date = datetime.now(timezone.utc)
+    db.commit()
+    db.refresh(claim)
+    
+    # 2. Dispatch the adjudication task to the Celery queue
+    logger.info(f"Dispatching adjudication task to Celery for claim_id: {claim.id}")
+    process_adjudication.delay(str(claim.id))
 
-@router.post("/{claim_id}/simulate-approval", response_model=schemas.Claim)
-async def simulate_approval(
-    claim_id: uuid.UUID,
-    db: Session = Depends(get_db)
-):
-    """
-    Simulates a payer approving a claim.
-    """
-    claim = crud_claim.get_claim(db, claim_id=claim_id)
-    if not claim:
-        raise HTTPException(status_code=404, detail="Claim not found")
-    
-    updated_claim = crud_claim.update_claim_status(db, claim=claim, status=ClaimStatus.approved)
-    logger.info(f"Claim {claim_id} status updated to APPROVED.")
-    
-    return updated_claim
+    # Return the claim in its current "submitted" state.
+    # The adjudication will happen in the background.
+    return claim
 
 # --- Read Endpoints ---
 
