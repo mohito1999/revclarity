@@ -54,3 +54,4 @@ redis==5.0.7
 kombu==5.4.0
 pgvector==0.2.5
 azure-identity==1.17.1
+WeasyPrint==62.5

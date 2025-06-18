@@ -130,7 +130,7 @@ def export_claim_as_cms1500(
     if db_claim is None:
         raise HTTPException(status_code=404, detail="Claim not found")
 
-    pdf_bytes = pdf_service.generate_cms1500_pdf(db_claim)
+    pdf_bytes = pdf_service.generate_claim_summary_pdf(db_claim)
     
     return Response(
         content=pdf_bytes,

@@ -117,36 +117,31 @@ def update_claim_adjudication(db: Session, claim_id: uuid.UUID, update_data: dic
 
 def create_service_lines_for_claim(db: Session, claim_id: uuid.UUID, validated_codes: dict, confidence_scores: dict, diagnosis_pointers: dict, extracted_claim_data: dict):
     """
-    Creates service line records for a claim, including all codes, charges, and pointers.
-    (FINAL, HYPER-REALISTIC VERSION)
+    Creates service line records for a claim, including all codes, dynamically extracted charges, and pointers.
+    (THE ACTUAL FINAL VERSION)
     """
-    # Clear any old service lines to ensure a clean slate
     db.query(models.ServiceLine).filter(models.ServiceLine.claim_id == claim_id).delete()
 
-    # Get the full list of final, validated ICD-10 codes for the entire claim.
+    service_lines_to_add = []
     final_icd10_codes = [item['code'] for item in validated_codes.get('icd10_codes', [])]
     
     # Create a lookup map for the dynamically extracted charges from the AI.
-    # The AI returns a list like: [{'cpt_code': '99214', 'charge_amount': 150.0}, ...]
-    charge_map = {line.get('cpt_code'): line.get('charge_amount') for line in extracted_claim_data.get('service_lines', [])}
+    charge_map = {line.get('cpt_code'): line.get('charge_amount', 0.0) for line in extracted_claim_data.get('service_lines', [])}
+    logger.info(f"Dynamically extracted charges map: {charge_map}")
 
-    service_lines_to_add = []
     # Loop through each CPT code that was validated
     for cpt_item in validated_codes.get('cpt_codes', []):
         cpt_code = cpt_item['code']
         
-        # Get the dynamic charge from our map, defaulting to 0.0 if not found.
+        # --- THE FIX: Use the charge_map to get the dynamic charge ---
         charge_amount = charge_map.get(cpt_code, 0.0)
-
+        
         sl = models.ServiceLine(
             claim_id=claim_id,
             cpt_code=cpt_code,
-            # Associate ALL relevant diagnoses with this service line.
             icd10_codes=final_icd10_codes,
             charge=charge_amount,
-            # Get the confidence score for this specific CPT code.
             code_confidence_score=confidence_scores.get(cpt_code),
-            # Get the primary diagnosis pointer for this CPT code.
             diagnosis_pointer=diagnosis_pointers.get(cpt_code, "A")
         )
         service_lines_to_add.append(sl)

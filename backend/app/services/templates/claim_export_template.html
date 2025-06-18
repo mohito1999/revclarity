@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Claim {{ claim.id }}</title>
+    <style>
+        @page { size: letter; margin: 0.5in; }
+        body { font-family: Arial, sans-serif; font-size: 9pt; }
+        h1, h2, h3 { margin: 0; padding: 0; }
+        h1 { font-size: 16pt; text-align: center; margin-bottom: 5px; }
+        h2 { font-size: 12pt; margin-top: 15px; border-bottom: 2px solid #333; padding-bottom: 3px; }
+        table { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 8pt; }
+        th, td { border: 1px solid #999; padding: 4px; text-align: left; vertical-align: top; }
+        th { background-color: #e0e0e0; font-weight: bold; }
+        .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px 20px; }
+        .grid-item { break-inside: avoid; }
+        .label { font-weight: bold; display: block; margin-bottom: 2px; font-size: 7pt; color: #555; }
+        .value { min-height: 12px; }
+        .section { margin-bottom: 15px; }
+        .status { padding: 3px 8px; border-radius: 10px; color: white; font-weight: bold; }
+        .status-approved { background-color: #28a745; }
+        .status-denied { background-color: #dc3545; }
+        .status-draft { background-color: #6c757d; }
+        .status-submitted { background-color: #007bff; }
+    </style>
+</head>
+<body>
+
+    <h1>Health Insurance Claim Form Submission</h1>
+    <h3 style="text-align:center; font-weight:normal; margin-bottom:20px;">Claim ID: {{ claim.id }}</h3>
+
+    <h2>Payer & Patient Information</h2>
+    <div class="section grid">
+        <div class="grid-item">
+            <span class="label">1. Insurance Type</span>
+            <div class="value">{{ claim.insurance_type or 'N/A' }}</div>
+        </div>
+        <div class="grid-item">
+            <span class="label">1a. Insured's ID Number</span>
+            <div class="value">{{ claim.insured_id_number or 'N/A' }}</div>
+        </div>
+        <div class="grid-item">
+            <span class="label">4. Insured's Name</span>
+            <div class="value">{{ claim.insured_name or 'N/A' }}</div>
+        </div>
+        <div class="grid-item">
+            <span class="label">2. Patient's Name</span>
+            <div class="value">{{ patient.last_name }}, {{ patient.first_name }}</div>
+        </div>
+         <div class="grid-item">
+            <span class="label">3. Patient's Birth Date & Sex</span>
+            <div class="value">{{ patient.date_of_birth.strftime('%Y-%m-%d') if patient.date_of_birth else 'N/A' }} / {{ patient_sex or 'N/A' }}</div>
+        </div>
+        <div class="grid-item">
+            <span class="label">6. Patient Relationship to Insured</span>
+            <div class="value">{{ claim.patient_relationship_to_insured or 'N/A' }}</div>
+        </div>
+        <div class="grid-item" style="grid-column: 1 / 4;">
+            <span class="label">5. Patient's Address</span>
+            <div class="value">{{ patient.address or 'N/A' }}</div>
+        </div>
+        <div class="grid-item" style="grid-column: 1 / 4;">
+            <span class="label">7. Insured's Address</span>
+            <div class="value">{{ claim.insured_address or 'N/A' }}</div>
+        </div>
+    </div>
+    
+    <h2>Claim & Condition Information</h2>
+    <div class="section grid">
+        <div class="grid-item">
+            <span class="label">10a. Employment Related?</span>
+            <div class="value">{{ 'Yes' if claim.is_condition_related_to_employment else 'No' }}</div>
+        </div>
+        <div class="grid-item">
+            <span class="label">10b. Auto Accident?</span>
+            <div class="value">{{ 'Yes' if claim.is_condition_related_to_auto_accident else 'No' }}</div>
+        </div>
+        <div class="grid-item">
+            <span class="label">10c. Other Accident?</span>
+            <div class="value">{{ 'Yes' if claim.is_condition_related_to_other_accident else 'No' }}</div>
+        </div>
+        <div class="grid-item">
+            <span class="label">14. Date of Current Illness</span>
+            <div class="value">{{ claim.date_of_current_illness.strftime('%Y-%m-%d') if claim.date_of_current_illness else 'N/A' }}</div>
+        </div>
+        <div class="grid-item">
+            <span class="label">17. Referring Provider Name</span>
+            <div class="value">{{ claim.referring_provider_name or 'N/A' }}</div>
+        </div>
+        <div class="grid-item">
+            <span class="label">17b. Referring Provider NPI</span>
+            <div class="value">{{ claim.referring_provider_npi or 'N/A' }}</div>
+        </div>
+         <div class="grid-item">
+            <span class="label">23. Prior Authorization Number</span>
+            <div class="value">{{ claim.prior_authorization_number or 'N/A' }}</div>
+        </div>
+    </div>
+
+    <h2>Diagnosis Codes</h2>
+    <div class="section grid" style="grid-template-columns: repeat(4, 1fr);">
+        {% set diagnosis_map = {} %}
+        {% for sl in claim.service_lines %}
+            {% for code in sl.icd10_codes %}
+                {% if code not in diagnosis_map %}
+                    {% set _ = diagnosis_map.update({code: loop.index | string}) %}
+                {% endif %}
+            {% endfor %}
+        {% endfor %}
+
+        {% for code, letter in diagnosis_map.items() %}
+             <div class="grid-item">
+                <span class="label">Diag. {{ letter }}:</span>
+                <div class="value">{{ code }}</div>
+            </div>
+        {% endfor %}
+    </div>
+
+    <h2>Service Lines</h2>
+    <div class="section">
+        <table>
+            <thead>
+                <tr>
+                    <th>Date of Service</th>
+                    <th>Place</th>
+                    <th>CPT/HCPCS</th>
+                    <th>Modifiers</th>
+                    <th>Diag. Ptr.</th>
+                    <th>Charge</th>
+                    <th>Units</th>
+                    <th>Rendering NPI</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for line in claim.service_lines %}
+                <tr>
+                    <td>{{ claim.date_of_service.strftime('%Y-%m-%d') if claim.date_of_service else 'N/A' }}</td>
+                    <td>11</td>
+                    <td>{{ line.cpt_code }}</td>
+                    <td></td>
+                    <td>{{ line.diagnosis_pointer }}</td>
+                    <td>${{ "%.2f"|format(line.charge or 0) }}</td>
+                    <td>1</td>
+                    <td>{{ claim.billing_provider_npi }}</td>
+                </tr>
+                {% else %}
+                <tr><td colspan="8">No service lines found.</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    
+    <h2>Billing & Provider Information</h2>
+    <div class="section grid">
+        <div class="grid-item">
+            <span class="label">25. Federal Tax ID</span>
+            <div class="value">{{ claim.federal_tax_id_number or 'N/A' }}</div>
+        </div>
+        <div class="grid-item">
+            <span class="label">26. Patient Account No.</span>
+            <div class="value">{{ claim.patient_account_no or 'N/A' }}</div>
+        </div>
+        <div class="grid-item">
+            <span class="label">27. Accept Assignment?</span>
+            <div class="value">{{ 'Yes' if claim.accept_assignment else 'No' }}</div>
+        </div>
+        <div class="grid-item" style="grid-column: 1 / 4;">
+            <span class="label">32. Service Facility Location</span>
+            <div class="value">{{ claim.service_facility_location_info or 'N/A' }}</div>
+        </div>
+        <div class="grid-item" style="grid-column: 1 / 4;">
+            <span class="label">33. Billing Provider</span>
+            <div class="value">{{ claim.billing_provider_info or 'N/A' }} (NPI: {{ claim.billing_provider_npi or 'N/A' }})</div>
+        </div>
+    </div>
+    
+    <h2>Financial Summary</h2>
+    <div class="section grid">
+        <div class="grid-item">
+            <span class="label">28. Total Charge</span>
+            <div class="value">${{ "%.2f"|format(claim.total_charge_amount or 0) }}</div>
+        </div>
+        <div class="grid-item">
+            <span class="label">29. Amount Paid (By Patient)</span>
+            <div class="value">${{ "%.2f"|format(claim.amount_paid_by_patient or 0) }}</div>
+        </div>
+         <div class="grid-item">
+            <span class="label">Patient Responsibility</span>
+            <div class="value">${{ "%.2f"|format(claim.patient_responsibility_amount or 0) }}</div>
+        </div>
+    </div>
+
+</body>
+</html>
