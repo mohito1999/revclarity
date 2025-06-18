@@ -163,3 +163,21 @@ def delete_claim(
     if db_claim is None:
         raise HTTPException(status_code=404, detail="Claim not found")
     return None
+
+@router.put("/{claim_id}", response_model=schemas.Claim)
+def update_claim_details(
+    claim_id: uuid.UUID,
+    claim_in: schemas.ClaimUpdate,
+    db: Session = Depends(get_db)
+):
+    """
+    Update a claim's details. This is used for manual edits in the workspace.
+    """
+    logger.info(f"Received request to update claim {claim_id}")
+    db_claim = crud_claim.get_claim(db, claim_id=claim_id)
+    if not db_claim:
+        raise HTTPException(status_code=404, detail="Claim not found")
+    
+    updated_claim = crud_claim.update_claim(db=db, claim_id=claim_id, claim_in=claim_in)
+    logger.info(f"Successfully updated claim {claim_id}")
+    return updated_claim

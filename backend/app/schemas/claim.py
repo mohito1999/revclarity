@@ -51,12 +51,41 @@ class ClaimData(BaseModel):
     payer_name: Optional[str] = None
     date_of_service: Optional[date] = None
     
-class ClaimUpdate(ClaimData):
-    # This schema allows updating any of the fields from ClaimData
+class ClaimUpdate(BaseModel):
+    # This schema now includes ALL fields that can be updated,
+    # both by a manual user edit and by the AI processing pipeline.
+    
+    # --- Fields from Manual Edit ---
+    payer_name: Optional[str] = None
+    total_charge_amount: Optional[float] = None
+    date_of_service: Optional[date] = None
+    insurance_type: Optional[str] = None
+    insured_id_number: Optional[str] = None
+    insured_name: Optional[str] = None
+    insured_address: Optional[str] = None
+    is_condition_related_to_employment: Optional[bool] = None
+    is_condition_related_to_auto_accident: Optional[bool] = None
+    is_condition_related_to_other_accident: Optional[bool] = None
+    insured_policy_group_or_feca_number: Optional[str] = None
+    date_of_current_illness: Optional[date] = None
+    referring_provider_name: Optional[str] = None
+    referring_provider_npi: Optional[str] = None
+    prior_authorization_number: Optional[str] = None
+    federal_tax_id_number: Optional[str] = None
+    patient_account_no: Optional[str] = None
+    accept_assignment: Optional[bool] = None
+    amount_paid_by_patient: Optional[float] = None
+    service_facility_location_info: Optional[str] = None
+    billing_provider_info: Optional[str] = None
+    billing_provider_npi: Optional[str] = None
+    
+    # --- Fields from AI Pipeline (THE FIX IS HERE) ---
     eligibility_status: Optional[str] = None
     patient_responsibility_amount: Optional[float] = None
     compliance_flags: Optional[Any] = None
-    pass
+    denial_reason: Optional[str] = None
+    denial_root_cause: Optional[str] = None
+    denial_recommended_action: Optional[str] = None
 
 # This is the full Claim object returned by our API
 class Claim(BaseModel):
