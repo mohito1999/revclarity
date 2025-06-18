@@ -16,3 +16,13 @@ def create_patient(db: Session, patient_in: schemas.PatientCreate) -> models.Pat
     db.commit()
     db.refresh(new_patient)
     return new_patient
+
+def delete_patient(db: Session, patient_id: uuid.UUID) -> Optional[models.Patient]:
+    """
+    Deletes a patient and all their associated data (claims, documents).
+    """
+    db_patient = get_patient(db, patient_id)
+    if db_patient:
+        db.delete(db_patient)
+        db.commit()
+    return db_patient

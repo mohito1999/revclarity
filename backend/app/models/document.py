@@ -13,7 +13,7 @@ class Document(Base):
     # --- MODIFIED ---
     # A document can belong to a claim OR a patient directly. So claim_id can be null.
     claim_id = Column(UUID(as_uuid=True), ForeignKey("claims.id"), nullable=True)
-    patient_id = Column(UUID(as_uuid=True), ForeignKey("patients.id"), nullable=False)
+    patient_id = Column(UUID(as_uuid=True), ForeignKey("patients.id", ondelete="CASCADE"), nullable=False)
 
     file_name = Column(String(255), nullable=False)
     file_path = Column(String(512), nullable=False)
@@ -22,7 +22,7 @@ class Document(Base):
     # Renamed document_type to be more specific, e.g., 'POLICY_DOC', 'CLAIM_FORM'
     document_purpose = Column(String(50))
     
-    raw_text = Column(Text)
+    parsed_text = Column(Text, nullable=True)
     uploaded_at = Column(DateTime, default=datetime.utcnow)
 
     claim = relationship("Claim", back_populates="documents")

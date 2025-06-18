@@ -89,3 +89,16 @@ def upload_patient_document(
         process_policy_document.delay(str(patient_id), str(new_document.id))
 
     return new_document
+
+@router.delete("/{patient_id}", status_code=204)
+def delete_patient(
+    patient_id: uuid.UUID,
+    db: Session = Depends(get_db)
+):
+    """
+    Delete a patient and all their associated claims and documents.
+    """
+    db_patient = crud_patient.delete_patient(db, patient_id=patient_id)
+    if db_patient is None:
+        raise HTTPException(status_code=404, detail="Patient not found")
+    return None # Return no content on successful deletion

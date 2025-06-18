@@ -150,3 +150,16 @@ def read_claim(
     if db_claim is None:
         raise HTTPException(status_code=404, detail="Claim not found")
     return db_claim
+
+@router.delete("/{claim_id}", status_code=204)
+def delete_claim(
+    claim_id: uuid.UUID,
+    db: Session = Depends(get_db)
+):
+    """
+    Delete a single claim.
+    """
+    db_claim = crud_claim.delete_claim(db, claim_id=claim_id)
+    if db_claim is None:
+        raise HTTPException(status_code=404, detail="Claim not found")
+    return None

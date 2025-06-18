@@ -3,6 +3,7 @@ from sqlalchemy.orm import Session
 import asyncio
 import uuid
 import json
+import time # <-- Add this import at the top of your file
 
 from app.db.session import SessionLocal
 from app import models, schemas
@@ -19,6 +20,29 @@ logger = logging.getLogger(__name__)
 def run_async(func):
     return asyncio.run(func)
 
+def get_or_parse_document_text(db: Session, doc: models.Document) -> str:
+    """
+    Checks if a document has already been parsed. If so, returns the saved text.
+    If not, calls the parsing service, saves the result, and then returns it.
+    """
+    if doc.parsed_text:
+        logger.info(f"Using cached parsed text for document: {doc.file_name}")
+        return doc.parsed_text
+    
+    logger.info(f"No cached text found. Parsing document: {doc.file_name}")
+    parsed_text = run_async(parsing_service.parse_document_async(doc.file_path))
+    
+    # Save the parsed text back to the database for future use
+    doc.parsed_text = parsed_text
+    db.add(doc)
+    db.commit()
+    db.refresh(doc)
+    
+    # Add a small delay after every parse to respect rate limits
+    time.sleep(1) # Using time.sleep as this part is synchronous within the task
+    
+    return parsed_text
+
 # This is our "Policy Genius" task, now fully included.
 @celery_app.task
 def process_policy_document(patient_id_str: str, document_id_str: str):
@@ -33,7 +57,7 @@ def process_policy_document(patient_id_str: str, document_id_str: str):
             logger.error(f"Policy document {document_id} not found.")
             return
 
-        markdown_text = run_async(parsing_service.parse_document_async(policy_document.file_path))
+        markdown_text = get_or_parse_document_text(db, policy_document)
         
         system_prompt = """
         You are an expert Health Insurance Benefits Analyst. Your task is to read the provided policy document text
@@ -80,22 +104,40 @@ def process_claim_creation(claim_id_str: str):
     claim_id = uuid.UUID(claim_id_str)
     
     try:
-        # 1. FETCH ALL RELEVANT DATA
+        # 1. FETCH CLAIM, PATIENT, AND **CLAIM-SPECIFIC** DOCUMENTS
         claim = crud_claim.get_claim(db, claim_id)
         if not claim or not claim.patient:
-            logger.error(f"Claim {claim_id} or its patient not found.")
+            logger.error(f"Claim {claim_id} or its patient not found. Aborting task.")
             return
             
-        all_docs = claim.patient.documents + claim.documents
+        # CORRECTED: Only use documents explicitly associated with THIS claim.
+        all_patient_docs = crud_claim.get_all_documents_for_patient(db, claim.patient_id)
+        if not all_patient_docs:
+            logger.error(f"No documents found for patient {claim.patient_id}. Cannot process claim.")
+            crud_claim.update_claim_status(db, claim, ClaimStatus.denied, "No documents found for patient.")
+            return
+
         parsed_docs = {}
-        for doc in all_docs:
+        for doc in all_patient_docs:
             purpose = doc.document_purpose or 'UNKNOWN'
             logger.info(f"Parsing document '{purpose}': {doc.file_name}")
-            content = run_async(parsing_service.parse_document_async(doc.file_path))
+            content = get_or_parse_document_text(db, doc)
+            
             if purpose in parsed_docs:
                 parsed_docs[purpose] += f"\n\n--- (Additional Document: {doc.file_name}) ---\n\n" + content
             else:
                 parsed_docs[purpose] = content
+            
+            # CORRECTED: Add a small delay between parsing calls to respect rate limits
+            time.sleep(1) # Simple, effective blocking sleep for a sync task
+
+        # CORRECTED: Explicitly fetch and parse the patient's policy document
+        policy_doc = crud_claim.find_document_by_purpose(db, patient_id=claim.patient_id, purpose='POLICY_DOC')
+        if policy_doc:
+            logger.info(f"Parsing associated policy document: {policy_doc.file_name}")
+            parsed_docs['POLICY_DOC'] = get_or_parse_document_text(db, policy_doc)
+        else:
+            logger.warning(f"No POLICY_DOC found for patient {claim.patient_id}. Proceeding without it, but results may be less accurate.")
 
         # 2. STEP 1 OF PIPELINE: SYNTHESIZE & EXTRACT
         extracted_claim_data = run_async(llm_service.synthesize_and_extract_claim_data(parsed_docs))
@@ -103,6 +145,9 @@ def process_claim_creation(claim_id_str: str):
         
         # 3. STEP 2 OF PIPELINE: CODING (RAG METHOD)
         encounter_note_text = parsed_docs.get('ENCOUNTER_NOTE', '')
+        if not encounter_note_text:
+             logger.warning(f"No ENCOUNTER_NOTE found for claim {claim_id}. Coding accuracy will be severely impacted.")
+
         coding_suggestions = run_async(llm_service.generate_medical_codes(encounter_note_text, extracted_claim_data))
         icd10_search_terms = coding_suggestions.get("icd10_search_terms", [])
         retrieved_icd10_candidates = crud_medical_code.find_similar_icd10_codes(db, icd10_search_terms)
@@ -166,7 +211,7 @@ def process_claim_creation(claim_id_str: str):
     except Exception as e:
         logger.error(f"Error in Celery task process_claim_creation for claim {claim_id}: {e}", exc_info=True)
         if 'claim' in locals() and claim:
-            crud_claim.update_claim_status(db, claim, ClaimStatus.denied)
+            crud_claim.update_claim_status(db, claim, ClaimStatus.denied, f"Internal Processing Error: {str(e)}")
     finally:
         db.close()
 
@@ -181,51 +226,45 @@ def process_adjudication(claim_id_str: str):
     db: Session = SessionLocal()
     claim_id = uuid.UUID(claim_id_str)
     try:
-        # 1. Fetch all necessary data for adjudication
         claim = crud_claim.get_claim_for_adjudication(db, claim_id)
-        if not claim or not claim.patient:
-            logger.error(f"Claim {claim_id} or its patient not found for adjudication.")
+        if not claim:
+            logger.error(f"Claim {claim_id} not found for adjudication.")
             return
 
-        # Find the patient's policy document to pass to the AI
         policy_doc = crud_claim.find_document_by_purpose(db, patient_id=claim.patient_id, purpose='POLICY_DOC')
         if not policy_doc:
             logger.error(f"No policy document found for patient {claim.patient_id}, cannot adjudicate.")
-            # In a real scenario, we would deny for no policy, but here we'll stop.
             return
         
-        policy_text = run_async(parsing_service.parse_document_async(policy_doc.file_path))
+        policy_text = get_or_parse_document_text(db, policy_doc)
         
-        # 2. Call the AI Adjudicator
-        # We need to serialize the claim object to pass it to the LLM
         claim_dict = schemas.Claim.from_orm(claim).model_dump()
         
+        # --- THE FIX: Make ONE call to our powerful adjudicator AI ---
         adjudication_result = run_async(llm_service.adjudicate_claim_as_payer(claim_dict, policy_text))
         logger.info(f"AI Adjudicator result: {adjudication_result}")
 
-        # 3. Update the claim based on the AI's decision
         decision = adjudication_result.get("decision")
         
-        update_data = {
-            "adjudication_date": datetime.utcnow()
-        }
+        update_data = { "adjudication_date": datetime.utcnow() }
 
         if decision == "approved":
             update_data["status"] = ClaimStatus.approved
             update_data["payer_paid_amount"] = adjudication_result.get("payer_paid_amount")
-            # The patient responsibility was already calculated, but the AI confirms it.
+        
         elif decision == "denied":
             update_data["status"] = ClaimStatus.denied
+            # All denial info now comes directly from the single adjudication result
             update_data["denial_reason"] = adjudication_result.get("denial_reason")
-            update_data["denial_root_cause"] = adjudication_result.get("denial_root_cause")
-            update_data["denial_recommended_action"] = adjudication_result.get("denial_recommended_action")
+            update_data["denial_root_cause"] = adjudication_result.get("root_cause")
+            update_data["denial_recommended_action"] = adjudication_result.get("recommended_action")
+            
         else:
-            logger.error("AI Adjudicator returned an invalid decision. Defaulting to denied.")
             update_data["status"] = ClaimStatus.denied
             update_data["denial_reason"] = "Processing Error: Invalid adjudication response from AI."
 
         crud_claim.update_claim_adjudication(db, claim_id=claim.id, update_data=update_data)
-        logger.info(f"Claim {claim_id} successfully adjudicated with status: {update_data['status']}.")
+        logger.info(f"Claim {claim_id} successfully adjudicated with status: {update_data.get('status')}.")
 
     except Exception as e:
         logger.error(f"Error in Celery task process_adjudication for claim {claim_id}: {e}", exc_info=True)

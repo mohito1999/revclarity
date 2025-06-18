@@ -21,7 +21,7 @@ class Claim(Base):
 
     # --- Core Identifiers ---
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    patient_id = Column(UUID(as_uuid=True), ForeignKey("patients.id"), nullable=False, index=True)
+    patient_id = Column(UUID(as_uuid=True), ForeignKey("patients.id", ondelete="CASCADE"), nullable=False, index=True)
     status = Column(Enum(ClaimStatus), nullable=False, default=ClaimStatus.draft, index=True)
 
     # --- Box 1-11: Patient & Insured Info ---
@@ -73,4 +73,4 @@ class Claim(Base):
     # --- Relationships ---
     patient = relationship("Patient", back_populates="claims")
     documents = relationship("Document", back_populates="claim", cascade="all, delete-orphan")
-    service_lines = relationship("ServiceLine", back_populates="claim", cascade="all, delete-orphan")
+    service_lines = relationship("ServiceLine", back_populates="claim", cascade="all, delete-orphan", passive_deletes=True)

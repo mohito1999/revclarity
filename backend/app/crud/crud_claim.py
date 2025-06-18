@@ -1,8 +1,11 @@
 import uuid
+import logging
 from sqlalchemy.orm import Session, joinedload
 from typing import Optional, List
 
 from app import models, schemas
+
+logger = logging.getLogger(__name__)
 
 # --- GET Functions ---
 
@@ -47,6 +50,13 @@ def find_document_by_purpose(db: Session, patient_id: uuid.UUID, purpose: str) -
         models.Document.document_purpose == purpose
     ).first()
 
+def get_all_documents_for_patient(db: Session, patient_id: uuid.UUID) -> List[models.Document]:
+    """
+    Retrieves all documents associated with a given patient_id.
+    """
+    return db.query(models.Document).filter(models.Document.patient_id == patient_id).all()
+
+
 # --- CREATE Functions ---
 
 def create_claim(db: Session, patient_id: uuid.UUID) -> models.Claim:
@@ -71,11 +81,13 @@ def create_document_for_claim(db: Session, doc_in: schemas.DocumentCreate) -> mo
 
 # --- UPDATE Functions ---
 
-def update_claim_status(db: Session, claim: models.Claim, status: models.ClaimStatus) -> models.Claim:
+def update_claim_status(db: Session, claim: models.Claim, status: models.ClaimStatus, denial_reason: str = None) -> models.Claim:
     """
     Updates the status of a given claim.
     """
     claim.status = status
+    if denial_reason: # If a reason is provided, save it.
+        claim.denial_reason = denial_reason
     db.add(claim)
     db.commit()
     db.refresh(claim)
@@ -149,3 +161,13 @@ def create_service_lines_for_claim(db: Session, claim_id: uuid.UUID, validated_c
     if service_lines_to_add:
         db.bulk_save_objects(service_lines_to_add)
         db.commit()
+
+def delete_claim(db: Session, claim_id: uuid.UUID) -> Optional[models.Claim]:
+    """
+    Deletes a claim and its associated data.
+    """
+    db_claim = get_claim(db, claim_id)
+    if db_claim:
+        db.delete(db_claim)
+        db.commit()
+    return db_claim

@@ -8,33 +8,48 @@ logger = logging.getLogger(__name__)
 azure_llm_client: Optional[AsyncAzureOpenAI] = None
 
 # --- Initialize the Azure OpenAI Client ---
-if all([settings.AZURE_OPENAI_ENDPOINT, settings.AZURE_OPENAI_API_KEY, settings.OPENAI_API_VERSION]):
+if all(
+    [
+        settings.AZURE_OPENAI_ENDPOINT,
+        settings.AZURE_OPENAI_API_KEY,
+        settings.OPENAI_API_VERSION,
+    ]
+):
     try:
         azure_llm_client = AsyncAzureOpenAI(
             azure_endpoint=settings.AZURE_OPENAI_ENDPOINT,
             api_key=settings.AZURE_OPENAI_API_KEY,
             api_version=settings.OPENAI_API_VERSION,
         )
-        logger.info(f"AsyncAzureOpenAI client initialized for endpoint: {settings.AZURE_OPENAI_ENDPOINT}")
+        logger.info(
+            f"AsyncAzureOpenAI client initialized for endpoint: {settings.AZURE_OPENAI_ENDPOINT}"
+        )
     except Exception as e:
-        logger.error(f"Failed to initialize AsyncAzureOpenAI client: {e}", exc_info=True)
+        logger.error(
+            f"Failed to initialize AsyncAzureOpenAI client: {e}",
+            exc_info=True,
+        )
 else:
-    logger.warning("Azure OpenAI settings are not fully configured. LLM service will be impaired.")
+    logger.warning(
+        "Azure OpenAI settings are not fully configured. LLM service will be impaired."
+    )
 
 
-async def _call_llm_with_json_response(system_prompt: str, user_prompt: str) -> Dict[str, Any]:
+async def _call_llm_with_json_response(
+    system_prompt: str, user_prompt: str
+) -> Dict[str, Any]:
     """Helper function to make a structured call to the LLM and get a JSON response."""
     if not azure_llm_client:
         raise ConnectionError("Azure LLM Client is not initialized.")
-    
+
     try:
         chat_completion = await azure_llm_client.chat.completions.create(
             model=settings.AZURE_LLM_DEPLOYMENT_NAME,
             messages=[
                 {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt}
+                {"role": "user", "content": user_prompt},
             ],
-            response_format={"type": "json_object"}
+            response_format={"type": "json_object"},
         )
         response_content = chat_completion.choices[0].message.content
         return json.loads(response_content)
@@ -42,38 +57,43 @@ async def _call_llm_with_json_response(system_prompt: str, user_prompt: str) -> 
         logger.error(f"Azure OpenAI API call failed: {e}", exc_info=True)
         raise
 
-# --- NEW: AI Step 1: Document Synthesizer & Extractor ---
-async def synthesize_and_extract_claim_data(documents: Dict[str, str]) -> Dict[str, Any]:
+
+# --- AI Step 1: Document Synthesizer & Extractor ---
+async def synthesize_and_extract_claim_data(
+    documents: Dict[str, str]
+) -> Dict[str, Any]:
     """
     Takes text from multiple documents, synthesizes the information, and extracts
     a comprehensive set of data points corresponding to a CMS-1500 form.
     """
-    logger.info("AI Step 1: Synthesizing and extracting comprehensive claim data from multiple documents.")
-    
+    logger.info(
+        "AI Step 1: Synthesizing and extracting comprehensive claim data from multiple documents."
+    )
+
     system_prompt = """
     You are an expert RCM data entry agent. Your task is to synthesize information from multiple provided documents
     (like a Patient Intake Form, an Insurance Card Summary, and a Physician's Encounter Note) to populate a complete
     JSON object for a medical claim.
 
     **Instructions:**
-    1.  **Synthesize:** Carefully read all provided documents. Information for one field might be spread across multiple sources. Choose the most accurate and specific value. For example, the Encounter Note is the best source for `date_of_service`, while the Insurance Card is the best source for `insured_id_number`.
-    2.  **Strict JSON Format:** The JSON object you return MUST conform EXACTLY to the structure below. Do not add extra keys, comments, or explanations. Your entire response must be only the JSON object.
-    3.  **Handle Missing Data:** If a value for a specific key cannot be found in ANY of the documents, you MUST use `null` for that key. Do not make up information.
+    1.  **Synthesize:** Carefully read all provided documents. Information for one field might be spread across multiple sources. Choose the most accurate and specific value.
+    2.  **Strict JSON Format:** The JSON object you return MUST conform EXACTLY to the structure below.
+    3.  **Handle Missing Data:** If a value for a specific key cannot be found, you MUST use `null`.
 
     **JSON Schema:**
     {
-      "insurance_type": "string (e.g., 'GROUP HEALTH PLAN')",
+      "insurance_type": "string",
       "insured_id_number": "string",
-      "patient_name": "string (Last, First Middle)",
+      "patient_name": "string",
       "patient_dob": "date (YYYY-MM-DD)",
       "patient_sex": "string (M or F)",
-      "insured_name": "string (Last, First Middle)",
+      "insured_name": "string",
       "patient_address": "string",
       "patient_city": "string",
-      "patient_state": "string (2-letter code)",
+      "patient_state": "string",
       "patient_zip": "string",
       "patient_phone": "string",
-      "patient_relationship_to_insured": "string (e.g., 'Self', 'Spouse', 'Child')",
+      "patient_relationship_to_insured": "string",
       "insured_address": "string",
       "is_condition_related_to_employment": "boolean",
       "is_condition_related_to_auto_accident": "boolean",
@@ -91,32 +111,39 @@ async def synthesize_and_extract_claim_data(documents: Dict[str, str]) -> Dict[s
       "service_facility_location_info": "string",
       "billing_provider_info": "string",
       "billing_provider_npi": "string",
-      "payer_name": "string (The name of the insurance company)",
+      "payer_name": "string",
       "date_of_service": "date (YYYY-MM-DD)",
       "service_lines": [
         {
-          "cpt_code": "string",
+          "cpt_code": "string (The 5-digit code, e.g., '99214')",
           "charge_amount": "number"
         }
       ]
     }
     """
-    
+
     # Combine all document texts into a single prompt
     user_prompt_parts = []
     for doc_name, text in documents.items():
-        user_prompt_parts.append(f"--- START OF DOCUMENT: {doc_name} ---\n{text}\n--- END OF DOCUMENT: {doc_name} ---")
-    
+        user_prompt_parts.append(
+            f"--- START OF DOCUMENT: {doc_name} ---\n{text}\n--- END OF DOCUMENT: {doc_name} ---"
+        )
+
     user_prompt = "\n\n".join(user_prompt_parts)
-    
+
     return await _call_llm_with_json_response(system_prompt, user_prompt)
 
+
 # --- AI Assembly Line Step 2a: Term Generator & CPT Suggester ---
-async def generate_medical_codes(markdown_text: str, extracted_data: Dict[str, Any]) -> Dict[str, List[str]]:
+async def generate_medical_codes(
+    markdown_text: str, extracted_data: Dict[str, Any]
+) -> Dict[str, List[str]]:
     """
     Analyzes text to extract ICD-10 search terms and suggest CPT codes.
     """
-    logger.info("AI Step 2a: Generating CPT codes and ICD-10 search terms.")
+    logger.info(
+        "AI Step 2a: Generating CPT codes and ICD-10 search terms."
+    )
     system_prompt = """
     You are an expert AI Medical Coder. Based on the provided text, perform two tasks:
     1.  **Extract ICD-10 Search Terms:** ...
@@ -129,8 +156,11 @@ async def generate_medical_codes(markdown_text: str, extracted_data: Dict[str, A
     user_prompt = f"Here is the document text:\n\n{markdown_text}\n\nAnd here is the initially extracted data for context:\n\n{json.dumps(extracted_data, indent=2)}"
     return await _call_llm_with_json_response(system_prompt, user_prompt)
 
+
 # --- AI Assembly Line Step 2c: Final ICD-10 Selector ---
-async def select_final_icd10_codes(markdown_text: str, candidate_codes: List[Dict[str, str]]) -> List[str]:
+async def select_final_icd10_codes(
+    markdown_text: str, candidate_codes: List[Dict[str, str]]
+) -> List[str]:
     """
     Given the original text and a list of candidate ICD-10 codes from a DB search,
     selects the most relevant codes.
@@ -153,12 +183,19 @@ async def select_final_icd10_codes(markdown_text: str, candidate_codes: List[Dic
         f"Candidate ICD-10 Codes from Database Search:\n{json.dumps(candidate_codes, indent=2)}\n\n"
         f"Please select the most relevant codes from the candidates."
     )
-    
-    response_dict = await _call_llm_with_json_response(system_prompt, user_prompt)
+
+    response_dict = await _call_llm_with_json_response(
+        system_prompt, user_prompt
+    )
     return response_dict.get("selected_icd10_codes", [])
 
+
 # --- AI Assembly Line Step 3: Compliance Officer & Refiner ---
-async def check_compliance_and_refine(markdown_text: str, extracted_data: Dict[str, Any], validated_codes: Dict[str, List[Dict]]) -> Dict[str, Any]:
+async def check_compliance_and_refine(
+    markdown_text: str,
+    extracted_data: Dict[str, Any],
+    validated_codes: Dict[str, List[Dict]],
+) -> Dict[str, Any]:
     """
     Acts as a claim scrubber and refiner.
     """
@@ -182,35 +219,63 @@ async def check_compliance_and_refine(markdown_text: str, extracted_data: Dict[s
     )
     return await _call_llm_with_json_response(system_prompt, user_prompt)
 
+
 # --- NEW: AI Assembly Line Step 4: Modifier Applier ---
-async def apply_modifiers(cpt_codes: List[str], compliance_flags: List[Dict]) -> List[str]:
+async def apply_modifiers(
+    cpt_codes: List[str], compliance_flags: List[Dict]
+) -> List[str]:
     """
     Takes a list of CPT codes and compliance flags, and returns a new list
     of CPT codes with the necessary modifiers applied.
     """
     logger.info("AI Step 4: Applying necessary modifiers.")
-    
+
     system_prompt = """
-    You are an expert billing specialist. You will be given a list of CPT codes and a list of compliance warnings.
-    Your job is to correct the CPT codes by appending the necessary modifiers based on the warnings.
+    You are a text transformation engine. Your only job is to modify a list of codes based on a set of rules.
+    You will be given a list of "Original CPT Codes" and a list of "Compliance Flags".
+    For each flag that mentions a missing modifier (like 'modifier 25'), find the corresponding CPT code in the original list and append the modifier (e.g., "-25").
     
-    For example, if a warning says "Modifier 25 is missing for CPT 99214", you should append "-25" to that code.
-    
-    Return a JSON object with a single key, "modified_cpt_codes", which is an array of the final, corrected CPT code strings
-    (e.g., ["99214-25", "73610"]). The array should contain ALL original codes, modified or not.
+    **CRITICAL RULES:**
+    1.  Your output MUST be a JSON object with a single key: `"modified_cpt_codes"`.
+    2.  The value of `"modified_cpt_codes"` MUST be an array of strings.
+    3.  Each string in the array MUST be a valid CPT code or CPT code with a modifier (e.g., "99214" or "99214-25").
+    4.  **DO NOT under any circumstances return descriptive text. ONLY return the codes.**
+    5.  The returned array must contain the same number of codes as the original list.
     """
-    
+
     user_prompt = (
         f"Original CPT Codes: {json.dumps(cpt_codes, indent=2)}\n\n"
         f"Compliance Flags to address:\n{json.dumps(compliance_flags, indent=2)}\n\n"
-        f"Please return the corrected list of CPT codes."
+        f"Please return the corrected list of CPT codes according to the rules."
     )
-    
-    response_dict = await _call_llm_with_json_response(system_prompt, user_prompt)
-    return response_dict.get("modified_cpt_codes", cpt_codes) # Return original codes if AI fails
 
-# --- NEW: AI Payer Adjudicator ---
-async def adjudicate_claim_as_payer(claim_data: Dict, policy_text: str) -> Dict[str, Any]:
+    response_dict = await _call_llm_with_json_response(
+        system_prompt, user_prompt
+    )
+
+    # --- Final safety check to prevent crashes ---
+    modified_codes = response_dict.get("modified_cpt_codes", cpt_codes)
+    # Ensure every code is a string and not too long.
+    sanitized_codes = [
+        str(code)[:10]
+        for code in modified_codes
+        if isinstance(code, (str, int))
+    ]
+
+    # Ensure the final list has the same number of elements as the input
+    if len(sanitized_codes) == len(cpt_codes):
+        return sanitized_codes
+    else:
+        logger.warning(
+            "Modifier AI returned a list of a different length. Falling back to original codes."
+        )
+        return cpt_codes  # Fallback to prevent data corruption
+
+
+# --- AI Payer Adjudicator ---
+async def adjudicate_claim_as_payer(
+    claim_data: Dict, policy_text: str
+) -> Dict[str, Any]:
     """
     Simulates a payer adjudicating a claim against a policy.
     Decides to Approve or Deny and provides rationale.
@@ -221,14 +286,12 @@ async def adjudicate_claim_as_payer(claim_data: Dict, policy_text: str) -> Dict[
     You are an expert claims adjudicator for HealthFirst Insurance. You will be given a submitted claim (as JSON) and the full text of the member's policy document. Your job is to review the claim **against the policy** and make a decision.
 
     **Instructions:**
-    1.  **Review the Claim & Policy:** Compare the services rendered (CPT codes) on the claim against the 'COVERAGE DETAILS' in the policy document. Check for coverage, co-pays, deductibles, and prior authorization requirements.
-    2.  **Make a Decision:** Your decision must be either 'approved' or 'denied'.
-        -   **Deny** if a service's CPT code is explicitly listed as excluded, or if a required `prior_authorization_number` is missing for a service that needs it (like an MRI).
-        -   **Approve** in all other cases.
-    3.  **Provide Rationale (based on your decision):**
-        -   **If Denied:** You MUST provide a `denial_reason` (a short, official-sounding reason), a `root_cause` (the internal explanation), and a `recommended_action` (what the provider should do next).
-        -   **If Approved:** You MUST calculate the `payer_paid_amount`. The formula is: (Total Charges - Co-Pay) * Coverage Percentage. You MUST also confirm the `patient_responsibility_amount` (usually the co-pay).
-    4.  **Return JSON:** Your entire response must be a single JSON object with the following structure.
+    1.  **Review:** Compare the claim's CPT codes against the policy's 'COVERAGE DETAILS'. Check for coverage, co-pays, deductibles, and prior authorization requirements.
+    2.  **Decide:** Your decision MUST be either 'approved' or 'denied'. Deny if a service requires prior authorization and the `prior_authorization_number` field is null or empty. Approve otherwise.
+    3.  **Provide Full Rationale:**
+        -   **If you Deny:** You MUST provide a `denial_reason`, a `root_cause`, AND a `recommended_action`.
+        -   **If you Approve:** You MUST calculate the `payer_paid_amount` and confirm the `patient_responsibility_amount`.
+    4.  **Return JSON:** Your entire response must be a single JSON object.
 
     **JSON Structure for Approval:**
     {
@@ -241,8 +304,8 @@ async def adjudicate_claim_as_payer(claim_data: Dict, policy_text: str) -> Dict[
     {
       "decision": "denied",
       "denial_reason": "Service requires prior authorization.",
-      "root_cause": "Claim was submitted for an MRI without a PA number in Box 23.",
-      "recommended_action": "Obtain prior authorization and resubmit the claim with the PA number."
+      "root_cause": "The policy requires Prior Authorization for CPT code 20610, but the `prior_authorization_number` on the claim was not provided.",
+      "recommended_action": "Obtain prior authorization from the payer and resubmit the claim with the PA number in Box 23."
     }
     """
 

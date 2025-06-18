@@ -18,7 +18,12 @@ class Patient(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
-    claims = relationship("Claim", back_populates="patient")
-    # --- NEW ---
-    # Add a relationship to documents, so we can easily find a patient's policy docs
-    documents = relationship("Document", back_populates="patient", cascade="all, delete-orphan")
+    # --- THE FIX IS HERE ---
+    # We are being more explicit with the cascade behavior.
+    # "all, delete-orphan" tells SQLAlchemy: "When I delete a Patient,
+    # also delete any Claim or Document that belongs to it."
+    # `passive_deletes=True` is an optimization that tells it to let the
+    # database's own ON DELETE CASCADE handle it, which is more efficient.
+    claims = relationship("Claim", back_populates="patient", cascade="all, delete-orphan", passive_deletes=True)
+    documents = relationship("Document", back_populates="patient", cascade="all, delete-orphan", passive_deletes=True)
+    policy_benefits = relationship("PolicyBenefit", back_populates="patient", cascade="all, delete-orphan", passive_deletes=True)

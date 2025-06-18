@@ -9,7 +9,7 @@ class PolicyBenefit(Base):
     __tablename__ = "policy_benefits"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    patient_id = Column(UUID(as_uuid=True), ForeignKey("patients.id"), nullable=False, index=True)
+    patient_id = Column(UUID(as_uuid=True), ForeignKey("patients.id", ondelete="CASCADE"), nullable=False, index=True)
     
     benefit_type = Column(String(255), nullable=False) # e.g., "Office Visit", "Specialist Visit", "X-Ray"
     cpt_code_match = Column(String(50)) # Optional: can link directly to a CPT code
