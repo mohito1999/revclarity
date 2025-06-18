@@ -91,8 +91,8 @@ def process_claim_documents(claim_id_str: str, document_id_str: str):
 
         # Step 2b (Retrieve): Search our DB for ICD-10 code candidates using the AI's terms
         icd10_search_terms = coding_suggestions.get("icd10_search_terms", [])
-        retrieved_icd10_candidates = crud_medical_code.search_icd10_codes_by_description(db, icd10_search_terms)
-        logger.info(f"AI Step 2b (Retrieve): Found {len(retrieved_icd10_candidates)} ICD-10 candidates from DB.")
+        retrieved_icd10_candidates = crud_medical_code.find_similar_icd10_codes(db, icd10_search_terms)
+        logger.info(f"AI Step 2b (Retrieve): Found {len(retrieved_icd10_candidates)} ICD-10 candidates from DB via vector search.")
 
         # Step 2c (Final Selection): Ask the LLM to choose the best ICD-10 codes from the retrieved candidates
         final_icd10_codes = run_async(llm_service.select_final_icd10_codes(markdown_text, retrieved_icd10_candidates))

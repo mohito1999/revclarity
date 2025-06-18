@@ -1,6 +1,7 @@
 import uuid
 from sqlalchemy import Column, String, Text, UniqueConstraint
 from sqlalchemy.dialects.postgresql import UUID
+from pgvector.sqlalchemy import Vector
 
 from app.db.base_class import Base
 
@@ -11,5 +12,6 @@ class MedicalCode(Base):
     code_value = Column(String(50), nullable=False, index=True)
     code_type = Column(String(20), nullable=False, index=True)  # "CPT" or "ICD-10"
     description = Column(Text, nullable=False)
+    vector = Column(Vector(1536), nullable=True)
 
     __table_args__ = (UniqueConstraint('code_value', 'code_type', name='_code_value_type_uc'),)

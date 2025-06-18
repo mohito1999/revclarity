@@ -2,10 +2,10 @@ import sqlalchemy as sa
 from sqlalchemy.orm import Session
 from sqlalchemy import func, cast, Text
 from typing import List, Dict
-from app.models import MedicalCode
+from app.models.medical_code import MedicalCode
 import logging
 from sqlalchemy import or_, and_
-
+from app.services.embedding_service import get_embeddings
 
 logger = logging.getLogger(__name__)
 
@@ -46,23 +46,33 @@ def validate_codes(db: Session, suggested_codes: Dict[str, List[str]]) -> Dict[s
             
     return validated_output
 
-def search_icd10_codes_by_description(db: Session, search_terms: List[str]) -> List[Dict[str, str]]:
+def find_similar_icd10_codes(db: Session, search_terms: List[str]) -> List[Dict[str, str]]:
     """
-    Searches for ICD-10 codes in the database using descriptive terms.
-    (CORRECTED QUERY LOGIC)
+    Finds the most semantically similar ICD-10 codes using vector search.
     """
     if not search_terms:
         return []
-    
-    # Create a list of ILIKE conditions for each search term
-    search_filters = [MedicalCode.description.ilike(f"%{term}%") for term in search_terms]
-    
-    # --- THE FIX: Explicitly combine the code_type and the OR conditions with AND ---
-    results = db.query(MedicalCode).filter(
-        and_(
-            MedicalCode.code_type == 'ICD-10',
-            or_(*search_filters)
-        )
-    ).limit(100).all() # Increased limit to 10 to give the final LLM more options
 
+    query_text = " ".join(search_terms)
+    
+    try:
+        query_vector = get_embeddings([query_text])[0]
+    except Exception as e:
+        logger.error(f"Could not get embedding for query text: {e}")
+        return []
+
+    if not query_vector:
+        logger.warning("Embedding service returned no vector for the query text.")
+        return []
+
+    # --- THE FIX IS HERE ---
+    # We access the distance function directly from the model's Vector column.
+    results = db.query(MedicalCode).filter(
+        MedicalCode.code_type == 'ICD-10'
+    ).order_by(
+        MedicalCode.vector.l2_distance(query_vector) # <-- This is the new, correct way
+    ).limit(50).all()
+
+    logger.info(f"Found {len(results)} similar ICD-10 candidates via vector search.")
+    
     return [{"code": code.code_value, "description": code.description} for code in results]
