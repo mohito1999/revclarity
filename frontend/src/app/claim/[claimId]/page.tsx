@@ -316,18 +316,20 @@ export default function ClaimWorkspacePage() {
       <div className="flex items-center space-x-2">
         {!isEditing ? (
           <>
-            <Button type="button" onClick={() => setIsEditing(true)}>
+            <Button
+              type="button"
+              onClick={() => setIsEditing(true)}
+              disabled={claim.status !== 'draft'}
+            >
               <Edit className="mr-2 h-4 w-4" /> Edit Claim
             </Button>
             <Button
               type="button"
               onClick={handleSubmitClaim}
-              disabled={
-                isSubmitting || !["draft", "denied"].includes(claim.status)
-              }
+              disabled={isSubmitting || claim.status !== 'draft'}
             >
               <Send className="mr-2 h-4 w-4" />
-              {isSubmitting ? "Submitting..." : "Submit & Simulate Outcome"}
+              {isSubmitting ? "Submitting..." : "Submit Claim"}
             </Button>
             <Button type="button" variant="outline" onClick={handleExportPdf}>
               <Download className="mr-2 h-4 w-4" />

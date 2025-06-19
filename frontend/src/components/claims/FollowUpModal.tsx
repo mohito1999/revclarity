@@ -4,16 +4,16 @@ import * as React from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Phone, Loader, Bot, User, CheckCircle, AlertTriangle } from "lucide-react";
-import { Progress } from "@/components/ui/progress"; // You may need to add this via shadcn: npx shadcn-ui@latest add progress
+import { Progress } from "@/components/ui/progress";
 
 type Stage = "idle" | "dialing" | "menu" | "hold" | "speaking" | "success" | "error";
 
 const stageMessages: Record<Stage, { icon: React.ReactNode, title: string, message: string }> = {
   idle: { icon: <Phone />, title: "Ready to Call", message: "Start AI follow-up for this claim." },
-  dialing: { icon: <Phone className="animate-pulse" />, title: "Dialing Payer...", message: "Connecting to HealthFirst Insurance..." },
-  menu: { icon: <Bot />, title: "Navigating IVR Menu", message: "AI is selecting: 'For Providers' -> 'Check Claim Status'." },
-  hold: { icon: <Loader className="animate-spin" />, title: "On Hold", message: "Your estimated wait time is less than 2 minutes." },
-  speaking: { icon: <User />, title: "Speaking with Agent", message: "AI is verifying patient details and claim number with the live agent." },
+  dialing: { icon: <Phone className="animate-pulse text-blue-500" />, title: "Dialing Payer...", message: "Connecting to HealthFirst Insurance..." },
+  menu: { icon: <Bot className="text-blue-500" />, title: "Navigating IVR Menu", message: "AI is selecting: 'For Providers' -> 'Check Claim Status'." },
+  hold: { icon: <Loader className="animate-spin text-amber-500" />, title: "On Hold", message: "Your estimated wait time is less than 2 minutes." },
+  speaking: { icon: <User className="text-blue-500" />, title: "Speaking with Agent", message: "AI is verifying patient details and claim number with the live agent." },
   success: { icon: <CheckCircle className="text-green-500" />, title: "Success!", message: "Claim status retrieved. The claim has been adjudicated." },
   error: { icon: <AlertTriangle className="text-destructive" />, title: "Error", message: "Could not retrieve claim status." },
 };
@@ -27,6 +27,14 @@ interface FollowUpModalProps {
 export function FollowUpModal({ claimId, onOpenChange, onComplete }: FollowUpModalProps) {
   const [stage, setStage] = React.useState<Stage>("idle");
   const [progress, setProgress] = React.useState(0);
+
+  React.useEffect(() => {
+    // Reset the modal state when a new claim is selected or it's closed
+    if (claimId) {
+      setStage("idle");
+      setProgress(0);
+    }
+  }, [claimId]);
 
   const runSimulation = async () => {
     if (!claimId) return;
@@ -42,8 +50,8 @@ export function FollowUpModal({ claimId, onOpenChange, onComplete }: FollowUpMod
     // Stage 3: On Hold
     setStage("hold");
     const holdInterval = setInterval(() => {
-      setProgress(p => (p >= 90 ? 90 : p + 10));
-    }, 1000);
+      setProgress(p => (p >= 90 ? 90 : p + 15));
+    }, 1500);
     await new Promise(res => setTimeout(res, 10000));
     clearInterval(holdInterval);
 
@@ -61,7 +69,7 @@ export function FollowUpModal({ claimId, onOpenChange, onComplete }: FollowUpMod
       setStage("success");
       setProgress(100);
       await new Promise(res => setTimeout(res, 2000));
-      onComplete(); // Tell the parent page to refresh
+      onComplete();
     } catch (e) {
       setStage("error");
     }
