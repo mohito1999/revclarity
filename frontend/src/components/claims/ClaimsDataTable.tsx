@@ -21,7 +21,8 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Claim } from "@/lib/types";
-import { FollowUpModal } from "./FollowUpModal"; // <-- Import the new modal
+import { FollowUpModal } from "./FollowUpModal";
+import { Loader2 } from "lucide-react"; // --- NEW: Import a loading spinner icon ---
 
 // --- The Main Table Component ---
 export function ClaimsDataTable() {
@@ -31,10 +32,12 @@ export function ClaimsDataTable() {
   const [error, setError] = React.useState<string | null>(null);
   const [sorting, setSorting] = React.useState<SortingState>([]);
   const [followUpClaimId, setFollowUpClaimId] = React.useState<string | null>(null);
+  
+  // --- NEW: State to track which claim is being directly simulated ---
+  const [simulatingClaimId, setSimulatingClaimId] = React.useState<string | null>(null);
 
   // --- Data Fetching ---
   const fetchClaims = React.useCallback(async () => {
-    // No need to set loading to true on auto-refresh
     try {
       const apiUrl = process.env.NEXT_PUBLIC_API_BASE_URL;
       const response = await fetch(`${apiUrl}/claims`);
@@ -53,6 +56,25 @@ export function ClaimsDataTable() {
   React.useEffect(() => {
     fetchClaims();
   }, [fetchClaims]);
+  
+  // --- NEW: Handler for the direct "Simulate Outcome" button ---
+  const handleDirectSimulate = async (claimId: string) => {
+    setSimulatingClaimId(claimId);
+    try {
+      const apiUrl = process.env.NEXT_PUBLIC_API_BASE_URL;
+      await fetch(`${apiUrl}/claims/${claimId}/simulate-outcome`, { method: 'POST' });
+      
+      // Give the background task a moment to complete before refreshing the UI
+      setTimeout(() => {
+        fetchClaims();
+        setSimulatingClaimId(null);
+      }, 5000); // 5-second delay to simulate processing
+
+    } catch (err) {
+      console.error("Direct simulation failed:", err);
+      setSimulatingClaimId(null);
+    }
+  };
 
   // --- Column Definitions ---
   const columns: ColumnDef<Claim>[] = [
@@ -86,7 +108,7 @@ export function ClaimsDataTable() {
         const formatted = new Intl.NumberFormat("en-US", {
           style: "currency",
           currency: "USD",
-        }).format(amount);
+        }).format(amount || 0);
         return <div className="text-right font-medium">{formatted}</div>;
       },
     },
@@ -98,24 +120,38 @@ export function ClaimsDataTable() {
         return date ? new Date(date as string).toLocaleDateString() : "N/A";
       },
     },
-    // --- THIS IS THE NEW ACTIONS COLUMN ---
+    // --- MODIFIED: The Actions column now shows two buttons ---
     {
       id: "actions",
       header: () => <div className="text-right">Actions</div>,
       cell: ({ row }) => {
         const claim = row.original;
+        const isSimulating = simulatingClaimId === claim.id;
+
         if (claim.status === "submitted") {
           return (
-            <div className="text-right">
+            <div className="flex justify-end gap-2">
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  handleDirectSimulate(claim.id);
+                }}
+                disabled={isSimulating || !!simulatingClaimId}
+              >
+                {isSimulating ? <Loader2 className="h-4 w-4 animate-spin" /> : "Simulate Outcome"}
+              </Button>
               <Button
                 variant="outline"
                 size="sm"
                 onClick={(e) => {
-                  e.stopPropagation(); // Prevent row click from firing
-                  setFollowUpClaimId(claim.id); // This opens the modal
+                  e.stopPropagation();
+                  setFollowUpClaimId(claim.id);
                 }}
+                disabled={isSimulating || !!simulatingClaimId}
               >
-                Follow Up
+                AI Follow Up
               </Button>
             </div>
           );
@@ -179,7 +215,6 @@ export function ClaimsDataTable() {
         </Table>
       </div>
       
-      {/* --- RENDER THE MODAL HERE --- */}
       <FollowUpModal
         claimId={followUpClaimId}
         onOpenChange={(open) => {
