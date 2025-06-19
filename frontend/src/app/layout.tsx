@@ -10,6 +10,7 @@ import {
   Users,
   Settings,
   Bot,
+  PieChart
 } from "lucide-react";
 import { ThemeProvider } from "@/components/ThemeProvider";
 import { ThemeToggle } from "@/components/ThemeToggle";
@@ -66,6 +67,12 @@ export default function RootLayout({
                     <Link href="/patients">
                       <Users className="h-4 w-4" />
                       Patients
+                    </Link>
+                  </Button>
+                  <Button variant="ghost" className="w-full justify-start gap-2" asChild>
+                    <Link href="/analytics">
+                      <PieChart className="h-4 w-4" />
+                      Analytics
                     </Link>
                   </Button>
                 </nav>
