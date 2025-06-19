@@ -104,13 +104,11 @@ def process_claim_creation(claim_id_str: str):
     claim_id = uuid.UUID(claim_id_str)
     
     try:
-        # 1. FETCH CLAIM, PATIENT, AND **CLAIM-SPECIFIC** DOCUMENTS
         claim = crud_claim.get_claim(db, claim_id)
         if not claim or not claim.patient:
             logger.error(f"Claim {claim_id} or its patient not found. Aborting task.")
             return
-            
-        # CORRECTED: Only use documents explicitly associated with THIS claim.
+
         all_patient_docs = crud_claim.get_all_documents_for_patient(db, claim.patient_id)
         if not all_patient_docs:
             logger.error(f"No documents found for patient {claim.patient_id}. Cannot process claim.")
@@ -128,10 +126,8 @@ def process_claim_creation(claim_id_str: str):
             else:
                 parsed_docs[purpose] = content
             
-            # CORRECTED: Add a small delay between parsing calls to respect rate limits
-            time.sleep(1) # Simple, effective blocking sleep for a sync task
+            time.sleep(1)
 
-        # CORRECTED: Explicitly fetch and parse the patient's policy document
         policy_doc = crud_claim.find_document_by_purpose(db, patient_id=claim.patient_id, purpose='POLICY_DOC')
         if policy_doc:
             logger.info(f"Parsing associated policy document: {policy_doc.file_name}")
@@ -139,11 +135,15 @@ def process_claim_creation(claim_id_str: str):
         else:
             logger.warning(f"No POLICY_DOC found for patient {claim.patient_id}. Proceeding without it, but results may be less accurate.")
 
-        # 2. STEP 1 OF PIPELINE: SYNTHESIZE & EXTRACT
+        # --- THE FIX STARTS HERE ---
+        # 1. AI STEP 1: SYNTHESIZE & EXTRACT
         extracted_claim_data = run_async(llm_service.synthesize_and_extract_claim_data(parsed_docs))
         logger.info("AI Step 1 (Synthesize & Extract) complete.")
         
-        # 3. STEP 2 OF PIPELINE: CODING (RAG METHOD)
+        # Initialize our update object with the extracted data
+        update_data = schemas.ClaimUpdate(**extracted_claim_data)
+
+        # 2. AI STEP 2: CODING (RAG METHOD)
         encounter_note_text = parsed_docs.get('ENCOUNTER_NOTE', '')
         if not encounter_note_text:
              logger.warning(f"No ENCOUNTER_NOTE found for claim {claim_id}. Coding accuracy will be severely impacted.")
@@ -160,44 +160,41 @@ def process_claim_creation(claim_id_str: str):
         validated_codes = crud_medical_code.validate_codes(db, initial_codes_for_validation)
         logger.info(f"AI Step 2 (Coding) complete. Validated codes: {validated_codes}")
 
-        # 4. STEP 3 OF PIPELINE: ELIGIBILITY, COMPLIANCE & MODIFIER APPLICATION
+        # 3. AI STEP 3: ELIGIBILITY, COMPLIANCE & MODIFIER APPLICATION
         cpt_code_strings = [item['code'] for item in validated_codes.get('cpt_codes', [])]
         eligibility_status, patient_resp = crud_policy_benefit.check_claim_eligibility(
             db=db, patient_id=claim.patient_id, service_codes=cpt_code_strings
         )
         logger.info(f"AI Step 3a (Eligibility) complete. Status: {eligibility_status}")
+        
+        # Add eligibility results to our update object
+        update_data.eligibility_status = eligibility_status
+        update_data.patient_responsibility_amount = patient_resp
 
         compliance_and_confidence = run_async(llm_service.check_compliance_and_refine(
             encounter_note_text, extracted_claim_data, validated_codes
         ))
         logger.info("AI Step 3b (Compliance) complete.")
+        
+        # Add compliance flags to our update object
+        update_data.compliance_flags = compliance_and_confidence.get("compliance_flags", [])
 
-        # --- NEW STEP 3c: APPLY MODIFIERS ---
         modified_cpt_codes = run_async(llm_service.apply_modifiers(
             cpt_codes=cpt_code_strings,
             compliance_flags=compliance_and_confidence.get("compliance_flags", [])
         ))
         logger.info(f"AI Step 3c (Modifier) complete. Final CPT codes: {modified_cpt_codes}")
         
-        # Update the validated_codes dictionary with the newly modified CPT codes
         for i, item in enumerate(validated_codes['cpt_codes']):
             if i < len(modified_cpt_codes):
                 item['code'] = modified_cpt_codes[i]
-        # --- END NEW STEP ---
 
-        # 5. FINAL STEP: UPDATE DATABASE
-        valid_update_fields = {
-            k: v for k, v in extracted_claim_data.items() 
-            if k in schemas.ClaimUpdate.model_fields
-        }
-        update_data = schemas.ClaimUpdate(**valid_update_fields)
-        
-        update_data.eligibility_status = eligibility_status
-        update_data.patient_responsibility_amount = patient_resp
-        update_data.compliance_flags = compliance_and_confidence.get("compliance_flags", [])
-        
+        # 4. FINAL STEP: UPDATE DATABASE
+        # We now have a single, complete update_data object.
+        # We use the same CRUD function that the manual edit uses.
         crud_claim.update_claim(db=db, claim_id=claim.id, claim_in=update_data)
         
+        # Create the service lines separately as before
         crud_claim.create_service_lines_for_claim(
             db=db, claim_id=claim.id, validated_codes=validated_codes,
             confidence_scores=compliance_and_confidence.get("confidence_scores", {}),

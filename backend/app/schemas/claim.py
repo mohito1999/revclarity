@@ -7,58 +7,17 @@ from app.models.claim import ClaimStatus
 from .document import Document
 from .service_line import ServiceLine
 
-# This will be the main schema for data coming from our new AI Extractor
-class ClaimData(BaseModel):
-    # Box 1-11
-    insurance_type: Optional[str] = None
-    insured_id_number: Optional[str] = None
-    patient_name: Optional[str] = None # Will be split into first/last later
-    patient_dob: Optional[date] = None
-    patient_sex: Optional[str] = None
-    insured_name: Optional[str] = None
-    patient_address: Optional[str] = None
-    patient_city: Optional[str] = None
-    patient_state: Optional[str] = None
-    patient_zip: Optional[str] = None
-    patient_phone: Optional[str] = None
-    patient_relationship_to_insured: Optional[str] = None
-    insured_address: Optional[str] = None
-    is_condition_related_to_employment: Optional[bool] = False
-    is_condition_related_to_auto_accident: Optional[bool] = False
-    is_condition_related_to_other_accident: Optional[bool] = False
-    insured_policy_group_or_feca_number: Optional[str] = None
-    
-    # Box 14-23
-    date_of_current_illness: Optional[date] = None
-    referring_provider_name: Optional[str] = None
-    referring_provider_npi: Optional[str] = None
-    prior_authorization_number: Optional[str] = None
-    
-    # Box 24 (Service Lines - will be handled separately by the AI)
-    # The AI will extract CPT codes and descriptions from the notes.
-    
-    # Box 25-33
-    federal_tax_id_number: Optional[str] = None
-    patient_account_no: Optional[str] = None
-    accept_assignment: Optional[bool] = True
-    total_charge_amount: Optional[float] = None
-    amount_paid_by_patient: Optional[float] = 0.0
-    service_facility_location_info: Optional[str] = None
-    billing_provider_info: Optional[str] = None
-    billing_provider_npi: Optional[str] = None
+# NEW: This is now the ONLY schema needed for updating a claim.
+# It will be used by both the AI pipeline and the manual edit form.
 
-    # Top-level info for our system
-    payer_name: Optional[str] = None
-    date_of_service: Optional[date] = None
-    
+class ServiceLineUpdate(BaseModel):
+    cpt_code: Optional[str] = None
+    icd10_codes: Optional[List[str]] = []
+    charge: Optional[float] = None
+    diagnosis_pointer: Optional[str] = None
+
 class ClaimUpdate(BaseModel):
-    # This schema now includes ALL fields that can be updated,
-    # both by a manual user edit and by the AI processing pipeline.
-    
-    # --- Fields from Manual Edit ---
-    payer_name: Optional[str] = None
-    total_charge_amount: Optional[float] = None
-    date_of_service: Optional[date] = None
+    # --- Fields from the AI Extractor (ClaimData) ---
     insurance_type: Optional[str] = None
     insured_id_number: Optional[str] = None
     insured_name: Optional[str] = None
@@ -74,18 +33,29 @@ class ClaimUpdate(BaseModel):
     federal_tax_id_number: Optional[str] = None
     patient_account_no: Optional[str] = None
     accept_assignment: Optional[bool] = None
+    total_charge_amount: Optional[float] = None
     amount_paid_by_patient: Optional[float] = None
     service_facility_location_info: Optional[str] = None
     billing_provider_info: Optional[str] = None
     billing_provider_npi: Optional[str] = None
-    
-    # --- Fields from AI Pipeline (THE FIX IS HERE) ---
+    payer_name: Optional[str] = None
+    date_of_service: Optional[date] = None
+
+    # --- Fields from the AI Analysis Pipeline ---
     eligibility_status: Optional[str] = None
     patient_responsibility_amount: Optional[float] = None
     compliance_flags: Optional[Any] = None
-    denial_reason: Optional[str] = None
-    denial_root_cause: Optional[str] = None
-    denial_recommended_action: Optional[str] = None
+    
+    # --- Fields from Manual Edits (including service lines) ---
+    service_lines: Optional[List[ServiceLineUpdate]] = None
+    
+    # This class no longer needs to be separate.
+    # We've merged ClaimData and the old ClaimUpdate into one.
+    class Config:
+        from_attributes = True
+
+# We no longer need the separate ClaimData class.
+# The other classes (ServiceLine, Claim) remain the same.
 
 # This is the full Claim object returned by our API
 class Claim(BaseModel):

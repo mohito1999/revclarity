@@ -96,12 +96,30 @@ def update_claim_status(db: Session, claim: models.Claim, status: models.ClaimSt
 def update_claim(db: Session, claim_id: uuid.UUID, claim_in: schemas.ClaimUpdate) -> Optional[models.Claim]:
     """
     Updates a claim with a comprehensive set of new data from a Pydantic schema.
+    This now includes logic to replace service lines.
     """
     db_claim = get_claim(db, claim_id)
     if not db_claim:
         return None
         
     update_data = claim_in.model_dump(exclude_unset=True)
+
+    # --- NEW: Handle service lines separately ---
+    if 'service_lines' in update_data:
+        new_service_lines_data = update_data.pop('service_lines')
+        
+        # 1. Delete existing service lines for this claim
+        db.query(models.ServiceLine).filter(models.ServiceLine.claim_id == claim_id).delete(synchronize_session=False)
+        
+        # 2. Create new service lines from the provided data
+        for line_data in new_service_lines_data:
+            new_line = models.ServiceLine(
+                claim_id=claim_id,
+                **line_data
+            )
+            db.add(new_line)
+
+    # Update the other top-level fields on the claim
     for field, value in update_data.items():
         setattr(db_claim, field, value)
         
