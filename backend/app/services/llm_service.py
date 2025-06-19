@@ -1,9 +1,11 @@
 import logging
 import json
+from pprint import pformat
 from openai import AsyncAzureOpenAI
 from app.core.config import settings
 from typing import Optional, List, Dict, Any
 
+logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
 azure_llm_client: Optional[AsyncAzureOpenAI] = None
 
@@ -133,7 +135,18 @@ async def synthesize_and_extract_claim_data(
 
     user_prompt = "\n\n".join(user_prompt_parts)
 
-    return await _call_llm_with_json_response(system_prompt, user_prompt)
+    # Log the system prompt and user prompt
+    logger.debug(f"System Prompt: {system_prompt}")
+    logger.debug(f"User Prompt: {user_prompt}")
+
+    response_json = await _call_llm_with_json_response(system_prompt, user_prompt)
+
+    # Log the extracted claim data
+    logger.debug(f"Extracted Claim Data: {pformat(response_json)}")
+
+    return response_json
+
+
 
 
 # --- AI Assembly Line Step 2a: Term Generator & CPT Suggester ---

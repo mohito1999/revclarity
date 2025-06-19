@@ -20,6 +20,9 @@ class ClaimUpdate(BaseModel):
     # --- Fields from the AI Extractor (ClaimData) ---
     insurance_type: Optional[str] = None
     insured_id_number: Optional[str] = None
+    patient_sex: Optional[str] = None
+    patient_address: Optional[str] = None
+    patient_relationship_to_insured: Optional[str] = None
     insured_name: Optional[str] = None
     insured_address: Optional[str] = None
     is_condition_related_to_employment: Optional[bool] = None
@@ -66,6 +69,9 @@ class Claim(BaseModel):
     # All the fields from our comprehensive database model
     insurance_type: Optional[str] = None
     insured_id_number: Optional[str] = None
+    patient_sex: Optional[str] = None
+    patient_address: Optional[str] = None
+    patient_relationship_to_insured: Optional[str] = None
     insured_name: Optional[str] = None
     insured_address: Optional[str] = None
     is_condition_related_to_employment: Optional[bool] = None

@@ -27,6 +27,9 @@ class Claim(Base):
     # --- Box 1-11: Patient & Insured Info ---
     insurance_type = Column(String(50)) # Box 1
     insured_id_number = Column(String(255)) # Box 1a
+    patient_sex = Column(String(10)) # Box 3
+    patient_address = Column(Text) # Box 5
+    patient_relationship_to_insured = Column(String(50)) # Box 6
     insured_name = Column(String(255)) # Box 4
     insured_address = Column(Text) # Box 7
     is_condition_related_to_employment = Column(Boolean) # Box 10a

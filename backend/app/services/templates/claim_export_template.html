@@ -49,7 +49,7 @@
         </div>
          <div class="grid-item">
             <span class="label">3. Patient's Birth Date & Sex</span>
-            <div class="value">{{ patient.date_of_birth.strftime('%Y-%m-%d') if patient.date_of_birth else 'N/A' }} / {{ patient_sex or 'N/A' }}</div>
+            <div class="value">{{ patient.date_of_birth.strftime('%Y-%m-%d') if patient.date_of_birth else 'N/A' }} / {{ claim.patient_sex or 'N/A' }}</div>
         </div>
         <div class="grid-item">
             <span class="label">6. Patient Relationship to Insured</span>
@@ -57,7 +57,7 @@
         </div>
         <div class="grid-item" style="grid-column: 1 / 4;">
             <span class="label">5. Patient's Address</span>
-            <div class="value">{{ patient.address or 'N/A' }}</div>
+            <div class="value">{{ claim.patient_address or 'N/A' }}</div>
         </div>
         <div class="grid-item" style="grid-column: 1 / 4;">
             <span class="label">7. Insured's Address</span>
