@@ -209,24 +209,20 @@ export default function ClaimWorkspacePage() {
   }, [claimId, fetchClaimDetails]);
 
   // --- ACTION HANDLERS ---
-  const handleSimulateOutcome = async () => {
+  const handleSubmitClaim = async () => {
     setIsSubmitting(true);
     setError(null);
     try {
       const apiUrl = process.env.NEXT_PUBLIC_API_BASE_URL;
-      const response = await fetch(
-        `${apiUrl}/claims/${claimId}/simulate-outcome`,
-        {
-          method: "POST",
-        }
-      );
+      const response = await fetch(`${apiUrl}/claims/${claimId}/submit`, { // <-- Use the new endpoint
+        method: 'POST',
+      });
       if (!response.ok) {
         const errorData = await response.json();
-        throw new Error(errorData.detail || "Failed to simulate outcome.");
+        throw new Error(errorData.detail || "Failed to submit claim.");
       }
       const updatedClaim = await response.json();
-      setClaim(updatedClaim);
-      resetFormWithClaimData(updatedClaim);
+      setClaim(updatedClaim); // Update the UI to show "submitted" status
     } catch (err: any) {
       setError(err.message);
     } finally {
@@ -325,7 +321,7 @@ export default function ClaimWorkspacePage() {
             </Button>
             <Button
               type="button"
-              onClick={handleSimulateOutcome}
+              onClick={handleSubmitClaim}
               disabled={
                 isSubmitting || !["draft", "denied"].includes(claim.status)
               }

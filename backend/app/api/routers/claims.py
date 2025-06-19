@@ -67,31 +67,48 @@ def create_claim_from_upload(
     
     return new_claim
 
+@router.post("/{claim_id}/submit", response_model=schemas.Claim)
+def submit_claim_to_payer(claim_id: uuid.UUID, db: Session = Depends(get_db)):
+    """
+    Marks a claim as 'submitted'. This is a distinct step before adjudication.
+    """
+    claim = crud_claim.get_claim(db, claim_id=claim_id)
+    if not claim:
+        raise HTTPException(status_code=404, detail="Claim not found")
+    if claim.status != models.ClaimStatus.draft:
+        raise HTTPException(status_code=400, detail=f"Cannot submit claim with status '{claim.status.name}'")
+    
+    claim.status = models.ClaimStatus.submitted
+    claim.submission_date = datetime.now(timezone.utc)
+    db.commit()
+    db.refresh(claim)
+    return claim
+
 @router.post("/{claim_id}/simulate-outcome", response_model=schemas.Claim)
 def simulate_claim_outcome(
     claim_id: uuid.UUID,
     db: Session = Depends(get_db)
 ):
     """
-    Submits the claim and simulates a payer outcome.
-    This triggers the AI Adjudicator to make a decision.
+    Triggers the AI Adjudicator to make a decision on an already submitted claim.
+    This does NOT change the claim status itself; the background task does.
     """
     claim = crud_claim.get_claim(db, claim_id=claim_id)
     if not claim:
         raise HTTPException(status_code=404, detail="Claim not found")
+
+    # The claim should be in 'submitted' status to be adjudicated.
+    if claim.status != models.ClaimStatus.submitted:
+        raise HTTPException(
+            status_code=400, 
+            detail=f"Cannot adjudicate claim with status '{claim.status.name}'. Must be 'submitted'."
+        )
     
-    # 1. Update the claim status to "submitted" to reflect the action
-    claim.status = models.claim.ClaimStatus.submitted
-    claim.submission_date = datetime.now(timezone.utc)
-    db.commit()
-    db.refresh(claim)
-    
-    # 2. Dispatch the adjudication task to the Celery queue
+    # Dispatch the adjudication task to the Celery queue.
     logger.info(f"Dispatching adjudication task to Celery for claim_id: {claim.id}")
     process_adjudication.delay(str(claim.id))
 
-    # Return the claim in its current "submitted" state.
-    # The adjudication will happen in the background.
+    # Return the claim in its current state. The UI will update when the task completes.
     return claim
 
 # --- Read Endpoints ---
