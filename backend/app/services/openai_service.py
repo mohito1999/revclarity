@@ -1,3 +1,4 @@
+#backend/app/services/openai_service.py
 import logging
 import json
 from openai import AsyncOpenAI
@@ -24,17 +25,30 @@ async def _call_llm_with_json_response(system_prompt: str, user_prompt: str) -> 
         raise ConnectionError("OpenAI Client is not initialized.")
 
     try:
-        # Using the new /v1/responses endpoint structure
+        # Determine the response format based on the prompt content
+        response_format_type = "json_object" if "JSON" in system_prompt else "text"
+        
         response = await client.chat.completions.create(
             model=settings.OPENAI_LLM_MODEL,
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt},
             ],
-            response_format={"type": "json_object"}
+            response_format={"type": response_format_type}
         )
+        
+        # --- CORRECTED LOGIC ---
+        # Always get the content from the response object
         response_content = response.choices[0].message.content
-        return json.loads(response_content)
+        
+        if response_format_type == "json_object":
+            # If we asked for JSON, parse it
+            return json.loads(response_content)
+        else:
+            # If we asked for text (for the chat), wrap it in a dictionary
+            # to maintain a consistent return type for the calling function.
+            return {"answer": response_content}
+            
     except Exception as e:
         logger.error(f"OpenAI API call failed: {e}", exc_info=True)
         raise
@@ -173,4 +187,91 @@ async def generate_emr_actions(extracted_data: Dict[str, Any]) -> Dict[str, Any]
     user_prompt = f"Based on the following extracted clinical data, generate the suggested EMR actions:\n\n{json.dumps(extracted_data, indent=2)}"
     return await _call_llm_with_json_response(system_prompt, user_prompt)
 
+async def extract_modmed_note_data(text_content: str) -> Dict[str, Any]:
+    """
+    Performs an exhaustive, deeply nested extraction of all data points from a structured EMR note (ModMed/EMA).
+    """
+    logger.info("AI Task: Performing EXHAUSTIVE extraction on ModMed/EMA Note...")
+    system_prompt = """
+    You are a world-class clinical data architect. Your task is to meticulously parse the text from an EMR visit note and transform it into a highly structured, deeply nested JSON object. Every single piece of information must be captured and categorized.
 
+    **CRITICAL INSTRUCTIONS:**
+    1.  **Be Exhaustive:** Do not omit any data. Extract everything, including patient identifiers, allergies, medications, history, vitals, every detail of the physical exam, test interpretations, and the full impression and plan.
+    2.  **Maintain Structure:** Adhere strictly to the nested JSON schema provided below.
+    3.  **Handle Nulls:** If a specific field or entire section is not present in the document, use `null` for that key.
+
+    **JSON Schema:**
+    {
+      "patient_demographics": {
+        "name": "string (LAST, FIRST)",
+        "pms_id": "string",
+        "mrn": "string",
+        "dob": "string (YYYY-MM-DD)",
+        "sex": "string",
+        "contact_info": "string"
+      },
+      "visit_details": {
+        "visit_date": "string (YYYY-MM-DD)",
+        "provider_name": "string",
+        "chief_complaint": "string"
+      },
+      "clinical_history": {
+        "allergies": ["string"],
+        "medications": ["string"],
+        "medical_history": ["string"],
+        "musculoskeletal_history": ["string"],
+        "surgical_history": ["string"],
+        "social_history": "string"
+      },
+      "vitals": {
+        "date": "string (YYYY-MM-DD)",
+        "time": "string (HH:MM)",
+        "taken_by": "string",
+        "height": "string",
+        "weight": "string",
+        "bmi": "number",
+        "bsa": "number"
+      },
+      "physical_exam": {
+        "general_appearance": "string",
+        "orientation": "string",
+        "mood": "string",
+        "lumbosacral": {
+          "rom": "string",
+          "skin_inspection": "string",
+          "palpation_findings": "string",
+          "posture": "string"
+        },
+        "extremity_strength_and_tone": [
+            { "muscle_group": "string (e.g., Right Iliopsoas)", "strength": "string (e.g., 5/5)", "tone": "string" }
+        ],
+        "sensation_and_reflexes": {
+            "dermatomal_sensation": "string",
+            "peripheral_sensation": "string",
+            "reflexes": "string"
+        }
+      },
+      "tests_and_results": [
+        {
+          "test_type": "string (e.g., 'X-Ray Interpretation Lumbar Spine')",
+          "diagnosis": "string",
+          "findings": "string"
+        }
+      ],
+      "impression_and_plan": [
+        {
+          "diagnosis": "string",
+          "associated_diagnoses": ["string"],
+          "plan_items": [
+            { "type": "string (e.g., 'Home Exercise Program', 'Counseling', 'Prescription')", "details": "string" }
+          ]
+        }
+      ],
+      "follow_up": {
+          "timeframe": "string",
+          "notes": "string"
+      }
+    }
+    """
+    user_prompt = f"Please perform an exhaustive extraction on the following EMR note, adhering strictly to the provided JSON schema:\n\n---\n\n{text_content}"
+    return await _call_llm_with_json_response(system_prompt, user_prompt)

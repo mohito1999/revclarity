@@ -1,3 +1,4 @@
+#backend/app/tasks.py
 import logging
 from sqlalchemy.orm import Session
 import asyncio
@@ -14,6 +15,8 @@ from app.models.meriplex_document import MeriplexDocumentStatus, MeriplexDocumen
 from app.celery_worker import celery_app
 import datetime
 from datetime import datetime, timezone
+
+from app.services.embedding_service import get_embeddings
 
 logger = logging.getLogger(__name__)
 
@@ -311,9 +314,18 @@ def process_meriplex_document(document_id_str: str):
             granular_note_data = run_async(openai_service.extract_dictated_note_data(markdown_content))
             final_data_to_store['extracted_note'] = granular_note_data
             
-            # --- SECOND AI STEP ---
             suggested_actions = run_async(openai_service.generate_emr_actions(granular_note_data))
             final_data_to_store['suggested_actions'] = suggested_actions.get('suggested_actions', [])
+
+        # --- NEW LOGIC FOR MODMED NOTES ---
+        elif classification_enum == MeriplexDocumentClassification.MODMED_NOTE:
+            exhaustive_data = run_async(openai_service.extract_modmed_note_data(markdown_content))
+            final_data_to_store['extracted_modmed_note'] = exhaustive_data
+            logger.info(f"Generating embedding for ModMed note: {db_doc.id}")
+            embedding = get_embeddings([markdown_content])
+            if embedding and embedding[0]:
+                db_doc.vector = embedding[0]
+
         
         db_doc.extracted_data = final_data_to_store
         db_doc.status = MeriplexDocumentStatus.COMPLETED

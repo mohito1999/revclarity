@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import { useRouter } from 'next/navigation'; // Import useRouter
 import {
   ColumnDef,
   flexRender,
@@ -21,7 +22,6 @@ import { Button } from "@/components/ui/button";
 import { Download, File, Loader2, ArrowUpDown } from "lucide-react";
 
 // --- Types ---
-// This interface now matches the comprehensive backend extraction
 interface ExtractedReferralData {
   patient_name: string;
   patient_dob: string;
@@ -34,18 +34,24 @@ interface ExtractedReferralData {
   referral_date: string;
 }
 
+// --- THE FIX: Update the document type to reflect the nested structure ---
 interface ReferralDocument {
   id: string;
   file_name: string;
-  extracted_data: ExtractedReferralData | null;
+  extracted_data: {
+    raw_text: string;
+    extracted_referral: ExtractedReferralData | null;
+  } | null;
 }
+// --- END FIX ---
 
 // --- Main Component ---
 export default function ReferralTaskListPage() {
+  const router = useRouter(); // Initialize router for navigation
   const [referrals, setReferrals] = React.useState<ReferralDocument[]>([]);
   const [loading, setLoading] = React.useState(true);
   const [sorting, setSorting] = React.useState<SortingState>([
-    { id: "referral_date", desc: true }, // Default sort by newest referral
+    { id: "referral_date", desc: true },
   ]);
 
   React.useEffect(() => {
@@ -65,52 +71,62 @@ export default function ReferralTaskListPage() {
     fetchReferrals();
   }, []);
 
-  // --- THE FIX: Expanded and reorganized columns for better utility ---
+  // --- THE FIX: Update all cell renderers to access the nested data ---
   const columns: ColumnDef<ReferralDocument>[] = [
     {
-      accessorKey: "referral_date",
+      id: "referral_date",
+      accessorKey: "extracted_data.extracted_referral.referral_date",
       header: ({ column }) => (
         <Button variant="ghost" onClick={() => column.toggleSorting(column.getIsSorted() === "asc")}>
           Referral Date <ArrowUpDown className="ml-2 h-4 w-4" />
         </Button>
       ),
-      cell: ({ row }) => row.original.extracted_data?.referral_date || "N/A",
+      cell: ({ row }) => row.original.extracted_data?.extracted_referral?.referral_date || "N/A",
     },
     {
       id: "patient_demographics",
       header: "Patient Demographics",
-      cell: ({ row }) => (
-        <div>
-          <div className="font-medium">{row.original.extracted_data?.patient_name || "N/A"}</div>
-          <div className="text-xs text-muted-foreground">{row.original.extracted_data?.patient_dob || "N/A"}</div>
-          <div className="text-xs text-muted-foreground">{row.original.extracted_data?.patient_phone || "N/A"}</div>
-        </div>
-      ),
+      cell: ({ row }) => {
+        const data = row.original.extracted_data?.extracted_referral;
+        return (
+          <div>
+            <div className="font-medium">{data?.patient_name || "N/A"}</div>
+            <div className="text-xs text-muted-foreground">{data?.patient_dob || "N/A"}</div>
+            <div className="text-xs text-muted-foreground">{data?.patient_phone || "N/A"}</div>
+          </div>
+        );
+      },
     },
     {
       id: "insurance",
       header: "Insurance",
-      cell: ({ row }) => (
-        <div>
-          <div className="font-medium">{row.original.extracted_data?.patient_primary_insurance || "N/A"}</div>
-          <div className="text-xs text-muted-foreground font-mono">{row.original.extracted_data?.patient_policy_id || "N/A"}</div>
-        </div>
-      ),
+      cell: ({ row }) => {
+        const data = row.original.extracted_data?.extracted_referral;
+        return (
+          <div>
+            <div className="font-medium">{data?.patient_primary_insurance || "N/A"}</div>
+            <div className="text-xs text-muted-foreground font-mono">{data?.patient_policy_id || "N/A"}</div>
+          </div>
+        );
+      },
     },
     {
-      accessorKey: "extracted_data.reason_for_referral",
+      accessorKey: "extracted_data.extracted_referral.reason_for_referral",
       header: "Reason for Referral",
-      cell: ({ row }) => <div className="max-w-xs whitespace-normal">{row.original.extracted_data?.reason_for_referral || "N/A"}</div>,
+      cell: ({ row }) => <div className="max-w-xs whitespace-normal">{row.original.extracted_data?.extracted_referral?.reason_for_referral || "N/A"}</div>,
     },
     {
       id: "referring_physician",
       header: "Referring Provider",
-       cell: ({ row }) => (
-        <div>
-          <div className="font-medium">{row.original.extracted_data?.referring_physician_name || "N/A"}</div>
-          <div className="text-xs text-muted-foreground">{row.original.extracted_data?.referring_physician_phone || "N/A"}</div>
-        </div>
-      ),
+       cell: ({ row }) => {
+        const data = row.original.extracted_data?.extracted_referral;
+        return (
+          <div>
+            <div className="font-medium">{data?.referring_physician_name || "N/A"}</div>
+            <div className="text-xs text-muted-foreground">{data?.referring_physician_phone || "N/A"}</div>
+          </div>
+        );
+      },
     },
     {
       id: "actions",
@@ -129,6 +145,7 @@ export default function ReferralTaskListPage() {
       },
     },
   ];
+  // --- END FIX ---
 
   const table = useReactTable({
     data: referrals,
@@ -171,7 +188,11 @@ export default function ReferralTaskListPage() {
               <TableRow><TableCell colSpan={columns.length} className="h-24 text-center"><Loader2 className="mx-auto h-6 w-6 animate-spin" /></TableCell></TableRow>
             ) : table.getRowModel().rows?.length ? (
               table.getRowModel().rows.map((row) => (
-                <TableRow key={row.id}>
+                <TableRow 
+                    key={row.id} 
+                    className="cursor-pointer" 
+                    onClick={() => router.push(`/orthopilot/document/${row.original.id}`)}
+                >
                   {row.getVisibleCells().map((cell) => (
                     <TableCell key={cell.id} className="align-top py-3">
                       {flexRender(cell.column.columnDef.cell, cell.getContext())}

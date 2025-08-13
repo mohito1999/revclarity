@@ -108,7 +108,7 @@ export default function DocumentActionCenterPage() {
         <Card className="flex flex-col">
           <CardHeader>
             <CardTitle>Original Document Text</CardTitle>
-            <CardDescription>OCR output from Mistral AI.</CardDescription>
+            <CardDescription>OCR output.</CardDescription>
           </CardHeader>
           <CardContent className="flex-1 overflow-y-auto">
             <pre className="text-sm whitespace-pre-wrap font-sans text-muted-foreground">
