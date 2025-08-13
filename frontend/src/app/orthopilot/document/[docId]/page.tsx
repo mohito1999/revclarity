@@ -15,10 +15,48 @@ import {
 } from "@/components/ui/dialog"
 
 // --- Types ---
+// Updated to match the actual API response structure
 interface SuggestedAction {
   type: 'DIAGNOSIS' | 'PRESCRIPTION' | 'PROCEDURE' | 'REFERRAL' | 'FOLLOW_UP';
-  summary: string;
-  details: any;
+  summary: string; // The summary field that exists in your data
+  details: {
+    // DIAGNOSIS fields
+    diagnosis?: string;
+    suggested_code?: string;
+    icd10?: string;
+    
+    // PRESCRIPTION fields (medication)
+    medication?: string;
+    sig?: string;
+    quantity?: number;
+    refills?: number;
+    instructions?: string;
+    notes?: string;
+    
+    // PRESCRIPTION fields (DME/device)
+    device?: string;
+    indication?: string;
+    
+    // PROCEDURE fields
+    procedure?: string;
+    name?: string;
+    site?: string;
+    laterality?: string;
+    description?: string;
+    
+    // REFERRAL fields
+    service?: string;
+    reason?: string;
+    priority?: string;
+    
+    // FOLLOW_UP fields
+    timeframe?: string;
+    when?: string;
+    contingency?: string;
+    
+    // Allow other properties for flexibility
+    [key: string]: any;
+  };
 }
 
 interface MeriplexDocument {
@@ -27,6 +65,7 @@ interface MeriplexDocument {
   extracted_data: {
     raw_text: string;
     suggested_actions?: SuggestedAction[];
+    extracted_note?: any; // Add this if you need it
   } | null;
   classification: string;
 }
@@ -37,8 +76,58 @@ const ActionIcon = ({ type }: { type: SuggestedAction['type'] }) => {
     case 'PRESCRIPTION': return <span className="text-purple-500">💊</span>;
     case 'PROCEDURE': return <span className="text-green-500">💉</span>;
     case 'FOLLOW_UP': return <span className="text-orange-500">🗓️</span>;
+    case 'REFERRAL': return <span className="text-teal-500">🤝</span>
     default: return <span>-</span>;
   }
+};
+
+// ActionCardContent component with proper typing
+const ActionCardContent = ({ action }: { action: SuggestedAction }) => {
+    let summary = action.summary || "Unknown Action";
+    let details = "";
+
+    const d = action.details;
+
+    switch (action.type) {
+        case 'DIAGNOSIS':
+            summary = `Add Diagnosis: ${d.diagnosis || 'Unknown'}`;
+            details = `Code: ${d.suggested_code || d.icd10 || 'N/A'}`;
+            break;
+        case 'PRESCRIPTION':
+            const item = d.medication || d.device || 'Unknown item';
+            summary = `Prescribe: ${item}`;
+            details = d.instructions || d.indication || d.sig || "Take as directed.";
+            break;
+        case 'PROCEDURE':
+            summary = `Perform Procedure: ${d.procedure || d.name || 'Unknown procedure'}`;
+            const detailParts = [];
+            if (d.description) detailParts.push(d.description);
+            if (d.laterality) detailParts.push(`Laterality: ${d.laterality}`);
+            if (d.site) detailParts.push(`Site: ${d.site}`);
+            details = detailParts.length > 0 ? detailParts.join(' • ') : "No details provided.";
+            break;
+        case 'REFERRAL':
+            summary = `Refer to: ${d.service || 'Unknown service'}`;
+            details = d.reason || "No reason provided.";
+            break;
+        case 'FOLLOW_UP':
+            summary = `Schedule Follow-up: ${d.timeframe || d.when || 'Unknown time'}`;
+            const followUpDetails = [];
+            if (d.reason) followUpDetails.push(d.reason);
+            if (d.contingency) followUpDetails.push(`Contingency: ${d.contingency}`);
+            details = followUpDetails.length > 0 ? followUpDetails.join(' • ') : "No reason provided.";
+            break;
+        default:
+            summary = action.summary || `${action.type}: Unknown action`;
+            details = "See full payload for details";
+    }
+
+    return (
+        <div>
+            <p className="font-medium text-sm">{summary}</p>
+            <p className="text-xs text-muted-foreground">{details}</p>
+        </div>
+    );
 };
 
 // --- Main Component ---
@@ -132,13 +221,7 @@ export default function DocumentActionCenterPage() {
                   <div key={index} className="flex items-center justify-between p-3 border rounded-lg">
                     <div className="flex items-center gap-3">
                       <ActionIcon type={action.type} />
-                      <div>
-                        <p className="font-medium text-sm">{action.summary}</p>
-                        <p className="text-xs text-muted-foreground">
-                          {action.type === 'DIAGNOSIS' && `Code: ${action.details.suggested_code}`}
-                          {action.type === 'PRESCRIPTION' && `Med: ${action.details.medication}`}
-                        </p>
-                      </div>
+                      <ActionCardContent action={action} />
                     </div>
                     <Button 
                       size="sm" 
@@ -165,7 +248,7 @@ export default function DocumentActionCenterPage() {
               {stagedActions.length > 0 ? (
                 stagedActions.map((action, index) => (
                   <div key={index} className="flex items-center justify-between text-sm bg-secondary/50 p-2 rounded-md">
-                     <p className="text-secondary-foreground">{action.summary}</p>
+                     <div className="text-secondary-foreground"><ActionCardContent action={action} /></div>
                     <Button size="icon" variant="ghost" className="h-6 w-6" onClick={() => handleUnstageAction(index)}>
                       <Trash2 className="h-4 w-4 text-muted-foreground" />
                     </Button>

@@ -1,7 +1,7 @@
-#backend/app/services/openai_service.py
 import logging
 import json
-from openai import AsyncOpenAI
+import asyncio
+from openai import AsyncOpenAI, RateLimitError
 from app.core.config import settings
 from typing import Optional, Dict, Any
 
@@ -13,53 +13,77 @@ client: Optional[AsyncOpenAI] = None
 if settings.OPENAI_API_KEY:
     try:
         client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
-        logger.info("Direct OpenAI client initialized successfully.")
+        logger.info("Direct OpenAI Async client initialized successfully.")
     except Exception as e:
         logger.error(f"Failed to initialize direct OpenAI client: {e}", exc_info=True)
 else:
     logger.warning("OpenAI API key is not configured. OrthoPilot AI features will be unavailable.")
 
-async def _call_llm_with_json_response(system_prompt: str, user_prompt: str) -> Dict[str, Any]:
-    """Helper function to make a structured call to the LLM and get a JSON response."""
+async def call_llm_with_reasoning(
+    instructions: str, 
+    user_input: str,
+    reasoning_effort: str = "low",
+    is_json: bool = False,
+    retries: int = 1,
+    retry_delay_seconds: int = 15
+) -> Dict[str, Any]:
+    """
+    Central helper function to call the new OpenAI Responses API, controlling reasoning effort
+    and including a simple retry mechanism for rate limit errors.
+    """
     if not client:
         raise ConnectionError("OpenAI Client is not initialized.")
 
-    try:
-        # Determine the response format based on the prompt content
-        response_format_type = "json_object" if "JSON" in system_prompt else "text"
-        
-        response = await client.chat.completions.create(
-            model=settings.OPENAI_LLM_MODEL,
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt},
-            ],
-            response_format={"type": response_format_type}
-        )
-        
-        # --- CORRECTED LOGIC ---
-        # Always get the content from the response object
-        response_content = response.choices[0].message.content
-        
-        if response_format_type == "json_object":
-            # If we asked for JSON, parse it
-            return json.loads(response_content)
-        else:
-            # If we asked for text (for the chat), wrap it in a dictionary
-            # to maintain a consistent return type for the calling function.
-            return {"answer": response_content}
+    last_exception = None
+    for attempt in range(retries + 1):
+        try:
+            response_format = {"type": "json_object"} if is_json else {"type": "text"}
             
-    except Exception as e:
-        logger.error(f"OpenAI API call failed: {e}", exc_info=True)
-        raise
+            messages = [
+                {"role": "system", "content": instructions},
+                {"role": "user", "content": user_input}
+            ]
+            
+            response = await client.responses.create(
+                model=settings.OPENAI_LLM_MODEL,
+                input=messages,
+                reasoning={"effort": reasoning_effort},
+                text={"format": response_format}
+            )
+            
+            response_content = response.output_text
+            if not response_content:
+                 raise ValueError("OpenAI API returned an empty response.")
+
+            if is_json:
+                return json.loads(response_content)
+            else:
+                return {"answer": response_content}
+        
+        # --- THE FIX: Catch RateLimitError and wait ---
+        except RateLimitError as e:
+            last_exception = e
+            if attempt < retries:
+                logger.warning(f"OpenAI rate limit hit. Retrying in {retry_delay_seconds} seconds... (Attempt {attempt + 1}/{retries + 1})")
+                await asyncio.sleep(retry_delay_seconds)
+            else:
+                logger.error("OpenAI rate limit hit. Max retries reached.")
+                raise e
+        except Exception as e:
+            logger.error(f"OpenAI API call failed: {e}", exc_info=True)
+            raise
+
+    # This part should not be reached if retries are exhausted, but as a fallback:
+    raise last_exception if last_exception else Exception("LLM call failed after all retries.")
+
 
 async def classify_document(text_content: str) -> Dict[str, str]:
     """
     Analyzes document text and classifies it into one of the predefined categories.
     """
     logger.info("AI Task: Classifying document...")
-    system_prompt = """
-    You are an expert document classifier for an orthopedic practice. Your task is to analyze the text of a document and classify it into ONE of the following categories: 'REFERRAL_FAX', 'DICTATED_NOTE', 'MODMED_NOTE', 'NON_REFERRAL'.
+    instructions = """
+     You are an expert document classifier for an orthopedic practice. Your task is to analyze the text of a document and classify it into ONE of the following categories: 'REFERRAL_FAX', 'DICTATED_NOTE', 'MODMED_NOTE', 'NON_REFERRAL'.
 
     - 'REFERRAL_FAX': Contains patient demographics, insurance info, and a clear "Reason for Referral".
     - 'DICTATED_NOTE': A transcribed note, often with headings like 'HISTORY OF PRESENT ILLNESS', 'ASSESSMENT AND PLAN'. Usually lacks the structured layout of an EMR printout.
@@ -68,16 +92,18 @@ async def classify_document(text_content: str) -> Dict[str, str]:
 
     You MUST return a JSON object with a single key "classification" and the corresponding category string as the value.
     """
-    user_prompt = f"Please classify the following document content:\n\n---\n\n{text_content[:4000]}" # Truncate for efficiency
+    user_input = f"Please classify the following document content:\n\n---\n\n{text_content[:4000]}"
+    # --- THE FIX: Increased reasoning effort for better accuracy ---
+    return await call_llm_with_reasoning(instructions, user_input, reasoning_effort="medium", is_json=True)
 
-    return await _call_llm_with_json_response(system_prompt, user_prompt)
+# ... (The rest of the functions in this file remain exactly the same) ...
 
 async def extract_referral_data(text_content: str) -> Dict[str, Any]:
     """
     Extracts a comprehensive set of structured data from a referral fax document.
     """
     logger.info("AI Task: Performing comprehensive extraction on Referral Fax...")
-    system_prompt = """
+    instructions = """
     You are a highly accurate medical data extraction AI for an orthopedic practice. Your task is to extract a comprehensive set of information from the provided text of a referral fax.
 
     You MUST return a JSON object with the following exact keys. If a value for any key cannot be found in the text, you MUST use `null`. Do not invent information. Pay close attention to formatting and the rules below.
@@ -109,18 +135,16 @@ async def extract_referral_data(text_content: str) -> Dict[str, Any]:
       "referral_date": "string"
     }
     """
-    user_prompt = f"Please extract the required information from this referral document text, following all rules carefully:\n\n---\n\n{text_content}"
-
-    return await _call_llm_with_json_response(system_prompt, user_prompt)
-
+    user_input = f"Please extract the data from this referral text, following all rules carefully:\n\n---\n\n{text_content}"
+    return await call_llm_with_reasoning(instructions, user_input, reasoning_effort="low", is_json=True)
 
 async def extract_dictated_note_data(text_content: str) -> Dict[str, Any]:
     """
     Performs a granular extraction of clinical data from a dictated visit note.
     """
     logger.info("AI Task: Performing GRANULAR extraction on Dictated Note...")
-    system_prompt = """
-    You are a specialist AI trained in parsing clinical documentation. Your task is to perform a highly granular extraction of a physician's dictated note and structure it into a clean JSON object.
+    instructions = """
+     You are a specialist AI trained in parsing clinical documentation. Your task is to perform a highly granular extraction of a physician's dictated note and structure it into a clean JSON object.
 
     Break down the 'Assessment and Plan' into discrete components: diagnoses, prescribed medications, recommended procedures, therapies, follow-up instructions, etc.
 
@@ -145,15 +169,15 @@ async def extract_dictated_note_data(text_content: str) -> Dict[str, Any]:
       }
     }
     """
-    user_prompt = f"Please extract the clinical data from this dictated note into the specified granular JSON format:\n\n---\n\n{text_content}"
-    return await _call_llm_with_json_response(system_prompt, user_prompt)
+    user_input = f"Please extract the clinical data from this dictated note into the specified granular JSON format:\n\n---\n\n{text_content}"
+    return await call_llm_with_reasoning(instructions, user_input, reasoning_effort="low", is_json=True)
 
 async def generate_emr_actions(extracted_data: Dict[str, Any]) -> Dict[str, Any]:
     """
     Takes structured clinical data and generates a list of suggested EMR actions.
     """
     logger.info("AI Task: Generating EMR actions from extracted data...")
-    system_prompt = """
+    instructions = """
     You are an AI RCM Co-pilot. Your task is to analyze a structured JSON object of extracted clinical data and generate a list of concrete, actionable tasks that an EMR system would perform. For each diagnosis, suggest a plausible ICD-10 code.
 
     Return a JSON object with a single key, "suggested_actions", which is an array of objects. Each object must have `type`, `summary`, and `details`.
@@ -184,12 +208,16 @@ async def generate_emr_actions(extracted_data: Dict[str, Any]) -> Dict[str, Any]
       ]
     }
     """
-    user_prompt = f"Based on the following extracted clinical data, generate the suggested EMR actions:\n\n{json.dumps(extracted_data, indent=2)}"
-    return await _call_llm_with_json_response(system_prompt, user_prompt)
+    user_input = f"Based on the following extracted clinical data, generate the suggested EMR actions:\n\n{json.dumps(extracted_data, indent=2)}"
+    return await call_llm_with_reasoning(instructions, user_input, reasoning_effort="low", is_json=True)
 
 async def extract_modmed_note_data(text_content: str) -> Dict[str, Any]:
     """
     Performs an exhaustive, deeply nested extraction of all data points from a structured EMR note (ModMed/EMA).
+    """
+    logger.info("AI Task: Performing EXHAUSTIVE extraction on ModMed/EMA Note...")
+    instructions = """
+   Performs an exhaustive, deeply nested extraction of all data points from a structured EMR note (ModMed/EMA).
     """
     logger.info("AI Task: Performing EXHAUSTIVE extraction on ModMed/EMA Note...")
     system_prompt = """
@@ -273,5 +301,5 @@ async def extract_modmed_note_data(text_content: str) -> Dict[str, Any]:
       }
     }
     """
-    user_prompt = f"Please perform an exhaustive extraction on the following EMR note, adhering strictly to the provided JSON schema:\n\n---\n\n{text_content}"
-    return await _call_llm_with_json_response(system_prompt, user_prompt)
+    user_input = f"Please perform an exhaustive extraction on the following EMR note, adhering strictly to the provided JSON schema:\n\n---\n\n{text_content}"
+    return await call_llm_with_reasoning(instructions, user_input, reasoning_effort="low", is_json=True)
