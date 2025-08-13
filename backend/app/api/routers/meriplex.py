@@ -67,6 +67,19 @@ def list_meriplex_documents(
     documents = crud_meriplex.get_meriplex_documents(db, classification=classification, skip=skip, limit=limit)
     return documents
 
+@router.get("/documents/{doc_id}", response_model=schemas.MeriplexDocument)
+def get_document_details(
+    doc_id: uuid.UUID,
+    db: Session = Depends(get_db)
+):
+    """
+    Retrieve the full details of a single Meriplex document by its ID.
+    """
+    db_doc = crud_meriplex.get_meriplex_document(db, doc_id=doc_id)
+    if db_doc is None:
+        raise HTTPException(status_code=404, detail="Document not found")
+    return db_doc
+
 @router.get("/documents/{doc_id}/download")
 async def download_meriplex_document(
     doc_id: uuid.UUID,

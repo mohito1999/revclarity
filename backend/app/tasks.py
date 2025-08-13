@@ -281,19 +281,17 @@ def process_meriplex_document(document_id_str: str):
     db_doc = crud_meriplex.get_meriplex_document(db, document_id)
     if not db_doc:
         logger.error(f"Document {document_id} not found in database. Aborting task.")
+        db.close()
         return
 
     try:
-        # 1. Update status to PROCESSING
         db_doc.status = MeriplexDocumentStatus.PROCESSING
         db.commit()
 
-        # 2. Get text content using Mistral OCR
         markdown_content = run_async(mistral_service.ocr_document_async(db_doc.file_path))
         if not markdown_content:
             raise ValueError("OCR process returned no content.")
 
-        # 3. Classify the document using OpenAI
         classification_result = run_async(openai_service.classify_document(markdown_content))
         classification_str = classification_result.get("classification", "UNCLASSIFIED")
         classification_enum = MeriplexDocumentClassification[classification_str]
@@ -303,17 +301,21 @@ def process_meriplex_document(document_id_str: str):
         db.refresh(db_doc)
         logger.info(f"Document {document_id} classified as: {classification_enum.name}")
 
-        # 4. --- NEW LOGIC: Extract data based on classification ---
-        extracted_data = None
+        final_data_to_store = {"raw_text": markdown_content}
+
         if classification_enum == MeriplexDocumentClassification.REFERRAL_FAX:
             extracted_data = run_async(openai_service.extract_referral_data(markdown_content))
-            # In the future, we will add:
-            # elif classification_enum == MeriplexDocumentClassification.DICTATED_NOTE:
-            #     extracted_data = run_async(openai_service.extract_dictated_note_data(markdown_content))
-            # etc.
-
-        # 5. Save results and mark as COMPLETED
-        db_doc.extracted_data = extracted_data
+            final_data_to_store['extracted_referral'] = extracted_data
+        
+        elif classification_enum == MeriplexDocumentClassification.DICTATED_NOTE:
+            granular_note_data = run_async(openai_service.extract_dictated_note_data(markdown_content))
+            final_data_to_store['extracted_note'] = granular_note_data
+            
+            # --- SECOND AI STEP ---
+            suggested_actions = run_async(openai_service.generate_emr_actions(granular_note_data))
+            final_data_to_store['suggested_actions'] = suggested_actions.get('suggested_actions', [])
+        
+        db_doc.extracted_data = final_data_to_store
         db_doc.status = MeriplexDocumentStatus.COMPLETED
         db.commit()
         db.refresh(db_doc)
@@ -324,7 +326,7 @@ def process_meriplex_document(document_id_str: str):
         logger.error(f"Error processing document {document_id}: {e}", exc_info=True)
         if db.is_active:
             db_doc.status = MeriplexDocumentStatus.ERROR
-            db_doc.processing_error = str(e)[:1024] # Truncate error to fit in DB
+            db_doc.processing_error = str(e)[:1024]
             db.commit()
     finally:
         db.close()

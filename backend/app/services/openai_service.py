@@ -100,3 +100,77 @@ async def extract_referral_data(text_content: str) -> Dict[str, Any]:
     return await _call_llm_with_json_response(system_prompt, user_prompt)
 
 
+async def extract_dictated_note_data(text_content: str) -> Dict[str, Any]:
+    """
+    Performs a granular extraction of clinical data from a dictated visit note.
+    """
+    logger.info("AI Task: Performing GRANULAR extraction on Dictated Note...")
+    system_prompt = """
+    You are a specialist AI trained in parsing clinical documentation. Your task is to perform a highly granular extraction of a physician's dictated note and structure it into a clean JSON object.
+
+    Break down the 'Assessment and Plan' into discrete components: diagnoses, prescribed medications, recommended procedures, therapies, follow-up instructions, etc.
+
+    **JSON Schema:**
+    {
+      "chief_complaint": "string",
+      "history_of_present_illness": "string",
+      "physical_exam_summary": "string",
+      "imaging_results_summary": "string",
+      "diagnoses": ["string"],
+      "plan": {
+        "medications_prescribed": [
+          { "name": "string", "instructions": "string" }
+        ],
+        "procedures_administered": [
+          { "name": "string", "details": "string" }
+        ],
+        "therapies_recommended": ["string"],
+        "durable_medical_equipment": ["string"],
+        "further_testing_recommended": ["string"],
+        "follow_up": "string (e.g., 'Follow-up in 4 weeks to reassess symptoms')"
+      }
+    }
+    """
+    user_prompt = f"Please extract the clinical data from this dictated note into the specified granular JSON format:\n\n---\n\n{text_content}"
+    return await _call_llm_with_json_response(system_prompt, user_prompt)
+
+async def generate_emr_actions(extracted_data: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Takes structured clinical data and generates a list of suggested EMR actions.
+    """
+    logger.info("AI Task: Generating EMR actions from extracted data...")
+    system_prompt = """
+    You are an AI RCM Co-pilot. Your task is to analyze a structured JSON object of extracted clinical data and generate a list of concrete, actionable tasks that an EMR system would perform. For each diagnosis, suggest a plausible ICD-10 code.
+
+    Return a JSON object with a single key, "suggested_actions", which is an array of objects. Each object must have `type`, `summary`, and `details`.
+
+    **Action Types:** 'DIAGNOSIS', 'PRESCRIPTION', 'PROCEDURE', 'REFERRAL', 'FOLLOW_UP'
+
+    **Example Input JSON:**
+    { "diagnoses": ["Osteoarthritis of the left knee"], "plan": { "medications_prescribed": [{"name": "Medrol Dosepak"}], "follow_up": "Follow up in 2 weeks" } }
+
+    **Example Output JSON:**
+    {
+      "suggested_actions": [
+        {
+          "type": "DIAGNOSIS",
+          "summary": "Add Diagnosis: Osteoarthritis of the left knee",
+          "details": { "diagnosis": "Osteoarthritis of the left knee", "suggested_code": "M17.12" }
+        },
+        {
+          "type": "PRESCRIPTION",
+          "summary": "Prescribe: Medrol Dosepak",
+          "details": { "medication": "Medrol Dosepak", "instructions": "Take as directed." }
+        },
+        {
+          "type": "FOLLOW_UP",
+          "summary": "Schedule Follow-up: 2 weeks",
+          "details": { "timeframe": "2 weeks", "reason": "To monitor improvement." }
+        }
+      ]
+    }
+    """
+    user_prompt = f"Based on the following extracted clinical data, generate the suggested EMR actions:\n\n{json.dumps(extracted_data, indent=2)}"
+    return await _call_llm_with_json_response(system_prompt, user_prompt)
+
+

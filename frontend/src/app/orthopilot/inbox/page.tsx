@@ -37,20 +37,20 @@ interface MeriplexDocument {
 
 // --- Main Component ---
 export default function DocumentInboxPage() {
+  const router = useRouter();
   const [documents, setDocuments] = React.useState<MeriplexDocument[]>([]);
-  const [initialLoading, setInitialLoading] = React.useState(true); // For the first load
-  const [polling, setPolling] = React.useState(false); // For background refreshes
+  const [initialLoading, setInitialLoading] = React.useState(true);
+  const [polling, setPolling] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
   const [uploading, setUploading] = React.useState(false);
   const [uploadError, setUploadError] = React.useState<string | null>(null);
   const fileInputRef = React.useRef<HTMLInputElement>(null);
 
-  // --- THE FIX: Modified fetchDocuments to handle background refreshes silently ---
   const fetchDocuments = React.useCallback(async (isSilent = false) => {
     if (!isSilent) {
       setInitialLoading(true);
     } else {
-      setPolling(true); // Indicate a background poll is happening
+      setPolling(true);
     }
 
     try {
@@ -63,18 +63,17 @@ export default function DocumentInboxPage() {
       setError(err.message);
     } finally {
       if (!isSilent) setInitialLoading(false);
-      setPolling(false); // Always turn off polling indicator
+      setPolling(false);
     }
   }, []);
 
   React.useEffect(() => {
-    fetchDocuments(false); // Initial, non-silent fetch
+    fetchDocuments(false);
     const interval = setInterval(() => {
-      fetchDocuments(true); // Subsequent silent fetches
+      fetchDocuments(true);
     }, 5000);
     return () => clearInterval(interval);
   }, [fetchDocuments]);
-  // --- END FIX ---
 
   const handleUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const files = event.target.files;
@@ -95,7 +94,6 @@ export default function DocumentInboxPage() {
         const errData = await response.json();
         throw new Error(errData.detail || "Upload failed");
       }
-      // Immediately trigger a silent refresh after upload
       await fetchDocuments(true);
     } catch (err: any) {
       setUploadError(err.message);
@@ -148,7 +146,6 @@ export default function DocumentInboxPage() {
           <p className="text-muted-foreground">Upload and track documents for AI processing.</p>
         </div>
         <div className="flex items-center gap-2">
-            {/* --- THE FIX: Refresh button now shows polling state --- */}
             <Button variant="outline" size="sm" onClick={() => fetchDocuments(false)} disabled={initialLoading || polling}>
                 <RefreshCw className={`h-4 w-4 ${polling || initialLoading ? 'animate-spin' : ''}`} />
             </Button>
@@ -189,12 +186,15 @@ export default function DocumentInboxPage() {
             ))}
           </TableHeader>
           <TableBody>
-            {/* --- THE FIX: Only show full-table loading on initial load --- */}
             {initialLoading ? (
                 <TableRow><TableCell colSpan={columns.length} className="h-24 text-center">Loading documents...</TableCell></TableRow>
             ) : table.getRowModel().rows?.length ? (
               table.getRowModel().rows.map((row) => (
-                <TableRow key={row.id}>
+                <TableRow
+                  key={row.id}
+                  className="cursor-pointer hover:bg-muted/50"
+                  onClick={() => router.push(`/orthopilot/document/${row.original.id}`)}
+                >
                   {row.getVisibleCells().map((cell) => (
                     <TableCell key={cell.id}>
                       {flexRender(cell.column.columnDef.cell, cell.getContext())}
