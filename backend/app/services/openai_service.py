@@ -302,4 +302,4 @@ async def extract_modmed_note_data(text_content: str) -> Dict[str, Any]:
     }
     """
     user_input = f"Please perform an exhaustive extraction on the following EMR note, adhering strictly to the provided JSON schema:\n\n---\n\n{text_content}"
-    return await call_llm_with_reasoning(instructions, user_input, reasoning_effort="low", is_json=True)
+    return await call_llm_with_reasoning(instructions, user_input, reasoning_effort="medium", is_json=True)

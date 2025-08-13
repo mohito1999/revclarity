@@ -165,9 +165,12 @@ export default function ReferralTaskListPage() {
           <h2 className="text-2xl font-bold tracking-tight">Referral Task List</h2>
           <p className="text-muted-foreground">Actionable list generated from incoming referral faxes.</p>
         </div>
-        <Button disabled>
-          <Download className="mr-2 h-4 w-4" />
-          Export to Excel
+        <Button onClick={() => {
+            const apiUrl = process.env.NEXT_PUBLIC_API_BASE_URL;
+            window.open(`${apiUrl}/orthopilot/referrals/export`, "_blank");
+        }}>
+        <Download className="mr-2 h-4 w-4" />
+        Export to Excel
         </Button>
       </div>
       <div className="rounded-md border">
