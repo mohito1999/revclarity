@@ -299,24 +299,32 @@ def process_meriplex_document(document_id_str: str):
         classification_enum = MeriplexDocumentClassification[classification_str]
         
         db_doc.classification = classification_enum
+        db.commit()
+        db.refresh(db_doc)
         logger.info(f"Document {document_id} classified as: {classification_enum.name}")
 
-        # 4. (Placeholder) Trigger extraction based on classification
-        # In the next phase, we will add the logic here to call the correct
-        # extraction function and save the results.
-        
-        # For now, we just mark it as complete.
+        # 4. --- NEW LOGIC: Extract data based on classification ---
+        extracted_data = None
+        if classification_enum == MeriplexDocumentClassification.REFERRAL_FAX:
+            extracted_data = run_async(openai_service.extract_referral_data(markdown_content))
+            # In the future, we will add:
+            # elif classification_enum == MeriplexDocumentClassification.DICTATED_NOTE:
+            #     extracted_data = run_async(openai_service.extract_dictated_note_data(markdown_content))
+            # etc.
+
+        # 5. Save results and mark as COMPLETED
+        db_doc.extracted_data = extracted_data
         db_doc.status = MeriplexDocumentStatus.COMPLETED
         db.commit()
         db.refresh(db_doc)
 
-        logger.info(f"Successfully processed document {document_id}.")
+        logger.info(f"Successfully processed and extracted data for document {document_id}.")
 
     except Exception as e:
         logger.error(f"Error processing document {document_id}: {e}", exc_info=True)
-        # Update the document record with the error
-        db_doc.status = MeriplexDocumentStatus.ERROR
-        db_doc.processing_error = str(e)
-        db.commit()
+        if db.is_active:
+            db_doc.status = MeriplexDocumentStatus.ERROR
+            db_doc.processing_error = str(e)[:1024] # Truncate error to fit in DB
+            db.commit()
     finally:
         db.close()

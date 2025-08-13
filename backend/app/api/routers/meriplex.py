@@ -1,14 +1,17 @@
 import uuid
+import os
 import logging
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
+from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
-from typing import List
+from typing import List, Optional
 
 from app import schemas
 from app.api.deps import get_db
 from app.crud import crud_meriplex
 from app.utils.file_handling import save_upload_file
 from app.tasks import process_meriplex_document
+from app.models.meriplex_document import MeriplexDocumentClassification
 
 router = APIRouter(
     prefix="/orthopilot",
@@ -51,10 +54,37 @@ def upload_meriplex_documents(
 
 @router.get("/documents", response_model=List[schemas.MeriplexDocument])
 def list_meriplex_documents(
-    skip: int = 0, limit: int = 100, db: Session = Depends(get_db)
+    classification: Optional[MeriplexDocumentClassification] = None, # <-- Add this parameter
+    skip: int = 0, 
+    limit: int = 100, 
+    db: Session = Depends(get_db)
 ):
     """
     Retrieve a list of all documents uploaded for the Meriplex POC.
+    Can be filtered by classification.
     """
-    documents = crud_meriplex.get_meriplex_documents(db, skip=skip, limit=limit)
+    # This now passes the filter down to the CRUD function
+    documents = crud_meriplex.get_meriplex_documents(db, classification=classification, skip=skip, limit=limit)
     return documents
+
+@router.get("/documents/{doc_id}/download")
+async def download_meriplex_document(
+    doc_id: uuid.UUID,
+    db: Session = Depends(get_db)
+):
+    """
+    Serves a specific document for download by its ID.
+    """
+    db_doc = crud_meriplex.get_meriplex_document(db, doc_id=doc_id)
+    if not db_doc or not db_doc.file_path:
+        raise HTTPException(status_code=404, detail="Document not found.")
+    
+    file_path = db_doc.file_path
+    if not os.path.exists(file_path):
+        raise HTTPException(status_code=404, detail="File not found on server.")
+
+    return FileResponse(
+        path=file_path,
+        filename=db_doc.file_name,
+        media_type='application/pdf'
+    )

@@ -58,4 +58,45 @@ async def classify_document(text_content: str) -> Dict[str, str]:
 
     return await _call_llm_with_json_response(system_prompt, user_prompt)
 
-# We will add the extraction functions here in a future step. This is enough for now.
+async def extract_referral_data(text_content: str) -> Dict[str, Any]:
+    """
+    Extracts a comprehensive set of structured data from a referral fax document.
+    """
+    logger.info("AI Task: Performing comprehensive extraction on Referral Fax...")
+    system_prompt = """
+    You are a highly accurate medical data extraction AI for an orthopedic practice. Your task is to extract a comprehensive set of information from the provided text of a referral fax.
+
+    You MUST return a JSON object with the following exact keys. If a value for any key cannot be found in the text, you MUST use `null`. Do not invent information. Pay close attention to formatting and the rules below.
+
+    --- DISAMBIGUATION RULES ---
+    1.  **patient_phone**: This is the patient's primary contact number. Look for labels like 'Patient Phone', 'Home Phone', 'Cell Phone', or simply 'Phone' within the main patient information block.
+    2.  **patient_policy_id**: This is a critical field. It is the patient's insurance identification number. Look for labels like 'Subscriber No', 'Insurance #', 'Policy ID', or 'Member ID'. It is often an alphanumeric string located near the insurance carrier's name.
+    3.  **patient_name**: Format as 'LAST, FIRST'.
+    4.  **Dates**: Format all dates as YYYY-MM-DD.
+
+    On a high level, I need you to be adaptable and understand that real world messy data can lead to documents which are not always formatted in a way that is easy to parse. As such, use your capabilities to understand the context of the document and extract the data in a way that is most likely to be correct. 
+    Do your absolute best to understand the context of the document and extract the data in a way that is most likely to be correct as per the JSON schema provided to you below. 
+
+    --- END DISAMBIGUATION RULES ---
+
+    **JSON Schema:**
+    {
+      "patient_name": "string",
+      "patient_dob": "string",
+      "patient_address": "string (Full address including city, state, zip)",
+      "patient_phone": "string",
+      "patient_primary_insurance": "string (The name of the insurance carrier, e.g., 'CIGNA', 'Medicare')",
+      "patient_policy_id": "string",
+      "reason_for_referral": "string (A concise, one-sentence summary of why the patient is being referred)",
+      "referring_physician_name": "string (Format as 'LAST, FIRST, CREDENTIALS')",
+      "referring_physician_facility": "string (The name of the clinic or hospital)",
+      "referring_physician_phone": "string",
+      "referring_physician_fax": "string",
+      "referral_date": "string"
+    }
+    """
+    user_prompt = f"Please extract the required information from this referral document text, following all rules carefully:\n\n---\n\n{text_content}"
+
+    return await _call_llm_with_json_response(system_prompt, user_prompt)
+
+

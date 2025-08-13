@@ -30,11 +30,22 @@ def get_meriplex_document(db: Session, doc_id: uuid.UUID) -> Optional[MeriplexDo
     """
     return db.query(MeriplexDocument).filter(MeriplexDocument.id == doc_id).first()
 
-def get_meriplex_documents(db: Session, skip: int = 0, limit: int = 100) -> List[MeriplexDocument]:
+def get_meriplex_documents(
+    db: Session, 
+    classification: Optional[MeriplexDocumentClassification] = None, 
+    skip: int = 0, 
+    limit: int = 100
+) -> List[MeriplexDocument]:
     """
     Retrieves a list of all Meriplex documents, newest first.
+    Can be filtered by classification.
     """
-    return db.query(MeriplexDocument).order_by(MeriplexDocument.created_at.desc()).offset(skip).limit(limit).all()
+    query = db.query(MeriplexDocument)
+    if classification:
+        query = query.filter(MeriplexDocument.classification == classification)
+        
+    return query.order_by(MeriplexDocument.created_at.desc()).offset(skip).limit(limit).all()
+
 
 def update_document_status_and_classification(
     db: Session, 
