@@ -1,3 +1,4 @@
+#backend/app/services/openai_service.py
 import logging
 import json
 import asyncio
@@ -216,11 +217,9 @@ async def extract_modmed_note_data(text_content: str) -> Dict[str, Any]:
     Performs an exhaustive, deeply nested extraction of all data points from a structured EMR note (ModMed/EMA).
     """
     logger.info("AI Task: Performing EXHAUSTIVE extraction on ModMed/EMA Note...")
+    
+    # --- THE FIX: This is the correct, single, detailed prompt ---
     instructions = """
-   Performs an exhaustive, deeply nested extraction of all data points from a structured EMR note (ModMed/EMA).
-    """
-    logger.info("AI Task: Performing EXHAUSTIVE extraction on ModMed/EMA Note...")
-    system_prompt = """
     You are a world-class clinical data architect. Your task is to meticulously parse the text from an EMR visit note and transform it into a highly structured, deeply nested JSON object. Every single piece of information must be captured and categorized.
 
     **CRITICAL INSTRUCTIONS:**
@@ -228,7 +227,7 @@ async def extract_modmed_note_data(text_content: str) -> Dict[str, Any]:
     2.  **Maintain Structure:** Adhere strictly to the nested JSON schema provided below.
     3.  **Handle Nulls:** If a specific field or entire section is not present in the document, use `null` for that key.
 
-    **JSON Schema:**
+    **Required JSON Schema:**
     {
       "patient_demographics": {
         "name": "string (LAST, FIRST)",
@@ -302,4 +301,6 @@ async def extract_modmed_note_data(text_content: str) -> Dict[str, Any]:
     }
     """
     user_input = f"Please perform an exhaustive extraction on the following EMR note, adhering strictly to the provided JSON schema:\n\n---\n\n{text_content}"
+    
+    # This complex task requires higher reasoning effort for accuracy.
     return await call_llm_with_reasoning(instructions, user_input, reasoning_effort="medium", is_json=True)
