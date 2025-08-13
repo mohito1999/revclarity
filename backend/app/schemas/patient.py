@@ -22,3 +22,10 @@ class Patient(PatientBase):
 
     class Config:
         from_attributes = True
+
+class PatientName(BaseModel):
+    first_name: Optional[str] = None
+    last_name: Optional[str] = None
+
+    class Config:
+        from_attributes = True

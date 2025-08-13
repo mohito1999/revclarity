@@ -7,9 +7,10 @@ import time # <-- Add this import at the top of your file
 
 from app.db.session import SessionLocal
 from app import models, schemas
-from app.crud import crud_claim, crud_policy_benefit, crud_medical_code
-from app.services import parsing_service, llm_service
+from app.crud import crud_claim, crud_policy_benefit, crud_medical_code, crud_meriplex
+from app.services import parsing_service, llm_service, openai_service, mistral_service
 from app.models.claim import ClaimStatus
+from app.models.meriplex_document import MeriplexDocumentStatus, MeriplexDocumentClassification
 from app.celery_worker import celery_app
 import datetime
 from datetime import datetime, timezone
@@ -265,5 +266,57 @@ def process_adjudication(claim_id_str: str):
 
     except Exception as e:
         logger.error(f"Error in Celery task process_adjudication for claim {claim_id}: {e}", exc_info=True)
+    finally:
+        db.close()
+
+@celery_app.task
+def process_meriplex_document(document_id_str: str):
+    """
+    Celery task to orchestrate the full AI processing pipeline for a Meriplex document.
+    """
+    logger.info(f"CELERY TASK: Starting OrthoPilot processing for document_id: {document_id_str}")
+    db: Session = SessionLocal()
+    document_id = uuid.UUID(document_id_str)
+    
+    db_doc = crud_meriplex.get_meriplex_document(db, document_id)
+    if not db_doc:
+        logger.error(f"Document {document_id} not found in database. Aborting task.")
+        return
+
+    try:
+        # 1. Update status to PROCESSING
+        db_doc.status = MeriplexDocumentStatus.PROCESSING
+        db.commit()
+
+        # 2. Get text content using Mistral OCR
+        markdown_content = run_async(mistral_service.ocr_document_async(db_doc.file_path))
+        if not markdown_content:
+            raise ValueError("OCR process returned no content.")
+
+        # 3. Classify the document using OpenAI
+        classification_result = run_async(openai_service.classify_document(markdown_content))
+        classification_str = classification_result.get("classification", "UNCLASSIFIED")
+        classification_enum = MeriplexDocumentClassification[classification_str]
+        
+        db_doc.classification = classification_enum
+        logger.info(f"Document {document_id} classified as: {classification_enum.name}")
+
+        # 4. (Placeholder) Trigger extraction based on classification
+        # In the next phase, we will add the logic here to call the correct
+        # extraction function and save the results.
+        
+        # For now, we just mark it as complete.
+        db_doc.status = MeriplexDocumentStatus.COMPLETED
+        db.commit()
+        db.refresh(db_doc)
+
+        logger.info(f"Successfully processed document {document_id}.")
+
+    except Exception as e:
+        logger.error(f"Error processing document {document_id}: {e}", exc_info=True)
+        # Update the document record with the error
+        db_doc.status = MeriplexDocumentStatus.ERROR
+        db_doc.processing_error = str(e)
+        db.commit()
     finally:
         db.close()

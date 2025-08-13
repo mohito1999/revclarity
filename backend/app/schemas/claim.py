@@ -6,6 +6,7 @@ from typing import List, Optional, Any, Dict
 from app.models.claim import ClaimStatus
 from .document import Document
 from .service_line import ServiceLine
+from .patient import PatientName
 
 # NEW: This is now the ONLY schema needed for updating a claim.
 # It will be used by both the AI pipeline and the manual edit form.
@@ -65,7 +66,8 @@ class Claim(BaseModel):
     id: uuid.UUID
     patient_id: uuid.UUID
     status: ClaimStatus
-    
+    patient: Optional[PatientName] = None
+
     # All the fields from our comprehensive database model
     insurance_type: Optional[str] = None
     insured_id_number: Optional[str] = None

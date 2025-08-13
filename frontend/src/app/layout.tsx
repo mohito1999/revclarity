@@ -10,7 +10,8 @@ import {
   Users,
   Settings,
   Bot,
-  PieChart
+  PieChart,
+  Briefcase
 } from "lucide-react";
 import { ThemeProvider } from "@/components/ThemeProvider";
 import { ThemeToggle } from "@/components/ThemeToggle";
@@ -73,6 +74,18 @@ export default function RootLayout({
                     <Link href="/analytics">
                       <PieChart className="h-4 w-4" />
                       Analytics
+                    </Link>
+                  </Button>
+                  <Button variant="ghost" className="w-full justify-start gap-2" asChild>
+                    <Link href="/agents">
+                      <Bot className="h-4 w-4" />
+                      Voice Agents
+                    </Link>
+                  </Button>
+                  <Button variant="ghost" className="w-full justify-start gap-2" asChild>
+                    <Link href="/orthopilot/inbox">
+                      <Briefcase className="h-4 w-4" />
+                      OrthoPilot POC
                     </Link>
                   </Button>
                 </nav>

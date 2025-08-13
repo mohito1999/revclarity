@@ -33,7 +33,10 @@ def get_claims(db: Session, skip: int = 0, limit: int = 100) -> List[models.Clai
     """
     Retrieves a list of claims with pagination.
     """
-    return db.query(models.Claim).order_by(models.Claim.created_at.desc()).offset(skip).limit(limit).all()
+    # --- MODIFIED: Added .options(joinedload(models.Claim.patient)) ---
+    return db.query(models.Claim).options(
+        joinedload(models.Claim.patient)
+    ).order_by(models.Claim.created_at.desc()).offset(skip).limit(limit).all()
 
 def get_document(db: Session, document_id: uuid.UUID) -> Optional[models.Document]:
     """
@@ -155,22 +158,37 @@ def create_service_lines_for_claim(db: Session, claim_id: uuid.UUID, validated_c
     service_lines_to_add = []
     final_icd10_codes = [item['code'] for item in validated_codes.get('icd10_codes', [])]
     
-    # Create a lookup map for the dynamically extracted charges from the AI.
+    # --- START OF NEW LOGIC ---
+    
+    # 1. Get the list of validated CPT codes and the total charge from the extraction step.
+    cpt_codes_to_process = validated_codes.get('cpt_codes', [])
+    total_charge = extracted_claim_data.get('total_charge_amount', 0.0) or 0.0
+    charge_to_distribute = 0.0
+
+    # 2. If we have CPT codes and a total charge, calculate the amount to distribute.
+    if cpt_codes_to_process and total_charge > 0:
+        charge_to_distribute = round(total_charge / len(cpt_codes_to_process), 2)
+        logger.info(f"Distributing total charge of ${total_charge} across {len(cpt_codes_to_process)} service lines (${charge_to_distribute} each).")
+    
+    # --- END OF NEW LOGIC ---
+
+    # Create a lookup map for the dynamically extracted charges from the AI (this is a fallback).
     charge_map = {line.get('cpt_code'): line.get('charge_amount', 0.0) for line in extracted_claim_data.get('service_lines', [])}
     logger.info(f"Dynamically extracted charges map: {charge_map}")
 
     # Loop through each CPT code that was validated
-    for cpt_item in validated_codes.get('cpt_codes', []):
+    for cpt_item in cpt_codes_to_process: # Use the list we defined above
         cpt_code = cpt_item['code']
         
-        # --- THE FIX: Use the charge_map to get the dynamic charge ---
-        charge_amount = charge_map.get(cpt_code, 0.0)
+        # --- MODIFIED CHARGE LOGIC ---
+        # Prioritize the distributed charge. Fallback to the charge_map if distribution isn't possible.
+        charge_amount = charge_to_distribute if charge_to_distribute > 0 else charge_map.get(cpt_code, 0.0)
         
         sl = models.ServiceLine(
             claim_id=claim_id,
             cpt_code=cpt_code,
             icd10_codes=final_icd10_codes,
-            charge=charge_amount,
+            charge=charge_amount, # Use the calculated charge
             code_confidence_score=confidence_scores.get(cpt_code),
             diagnosis_pointer=diagnosis_pointers.get(cpt_code, "A")
         )

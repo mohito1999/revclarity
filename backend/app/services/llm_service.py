@@ -217,7 +217,7 @@ async def check_compliance_and_refine(
     logger.info("AI Step 3: Checking compliance and refining codes.")
     system_prompt = """
     You are an AI RCM Compliance Officer. Your final job is to review a claim and perform three tasks:
-    1.  **Compliance Check:** Flag potential issues like missing modifiers. Be aware that our internal database stores ICD-10 codes WITHOUT dots (e.g., 'S93401A'), so do not flag discrepancies related to dots.
+    1.  **Compliance Check:** Flag potential issues like missing modifiers. Be aware that our internal database stores ICD-10 codes WITHOUT dots (e.g., 'S93401A'), so do not flag discrepancies related to dots. Also flag other violations as per the documents you have provided such as the policy doc, the intake form and the encounter note. Essentially, anything which might lead to the claim failing should be flagged for review.
     2.  **Confidence Scoring:** Assign a confidence score (0.0 to 1.0) for each CPT and ICD-10 code based on how well it is supported by the document text.
     3.  **Diagnosis Linking:** For each CPT code, determine which ICD-10 code(s) justify the procedure. The first ICD-10 code in the list is "A", the second is "B", etc. You can link multiple, separated by a comma (e.g., "A,B").
 
@@ -302,9 +302,9 @@ async def adjudicate_claim_as_payer(
 
     **Instructions:**
     1.  **Review:** Compare the claim's CPT codes against the policy's 'COVERAGE DETAILS'. Check for coverage, co-pays, deductibles, and prior authorization requirements.
-    2.  **Decide:** Your decision MUST be either 'approved' or 'denied'. Deny if a service requires prior authorization and the `prior_authorization_number` field is null or empty. Approve otherwise.
+    2.  **Decide:** Your decision MUST be either 'approved' or 'denied'. To decide whether to deny or approve a claim, you need to carry out a hollistic review of the claim and the policy and use your own knowledge as an adjudicator to decide whether to approve or deny a claim.
     3.  **Provide Full Rationale:**
-        -   **If you Deny:** You MUST provide a `denial_reason`, a `root_cause`, AND a `recommended_action`.
+        -   **If you Deny:** You MUST provide a `denial_reason` which should contain the reason for the denial along with a denial code, a `root_cause`, AND a `recommended_action`.
         -   **If you Approve:** You MUST calculate the `payer_paid_amount` and confirm the `patient_responsibility_amount`.
     4.  **Return JSON:** Your entire response must be a single JSON object.
 
