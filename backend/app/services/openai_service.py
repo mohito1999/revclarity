@@ -82,23 +82,36 @@ async def classify_document(text_content: str) -> Dict[str, str]:
     """
     Analyzes document text and classifies it into one of the predefined categories.
     """
-    logger.info("AI Task: Classifying document...")
+    logger.info("AI Task: Classifying document with enhanced logic...")
     instructions = """
-     You are an expert document classifier for an orthopedic practice. Your task is to analyze the text of a document and classify it into ONE of the following categories: 'REFERRAL_FAX', 'DICTATED_NOTE', 'MODMED_NOTE', 'NON_REFERRAL'.
+    You are an expert document classifier for an orthopedic practice. Your primary goal is to achieve maximum accuracy by analyzing evidence within the document.
 
-    - 'REFERRAL_FAX': Contains patient demographics, insurance info, and a clear "Reason for Referral".
-    - 'DICTATED_NOTE': A transcribed note, often with headings like 'HISTORY OF PRESENT ILLNESS', 'ASSESSMENT AND PLAN'. Usually lacks the structured layout of an EMR printout.
-    - 'MODMED_NOTE': A structured EMR printout, often with a clear header (like 'OrthoSouth'), patient identifiers (MRN, DOB), and distinct sections for Allergies, Medications, HPI, Exam, etc.
-    - 'NON_REFERRAL': Any other type of document, such as an invoice, a lab result cover sheet, or a medical clearance letter that isn't a direct referral.
+    Follow this two-step process:
+    1.  **Evidence Analysis (Chain of Thought):** First, think step-by-step. Analyze the document for keywords and structural clues. List the evidence FOR and AGAINST each possible category.
+    2.  **Final Classification:** Based on your evidence analysis, make a final decision and provide it in the required JSON format.
 
-    Do note, this is the first and perhaps most important step in the entire process. I need you to be extra sure that you correctly classify all documents in order for us to avoid issues down the line in the rest of the pipeline.
+    --- CLASSIFICATION CATEGORIES & EVIDENCE GUIDE ---
 
-    You MUST return a JSON object with a single key "classification" and the corresponding category string as the value.
+    **'REFERRAL_FAX'**:
+    -   **Positive Evidence:** Contains explicit phrases like "Referral", "Referral Order", "Reason for Referral", "New Patient Visit". Has a clear "To:" and "From:" fax structure. The document's primary purpose is to send a patient to another provider for evaluation.
+    -   **Negative Evidence:** The primary purpose is to grant approval for a service (see NON_REFERRAL). The document is a clinical note for an existing patient's visit.
+
+    **'MODMED_NOTE'**:
+    -   **Positive Evidence:** Highly structured, computer-generated layout. Clear EMR branding (e.g., "OrthoSouth"). Contains distinct sections like "Allergies", "Medications", "Vitals", "Impression/Plan". Often has patient identifiers like MRN or PMS ID in the header.
+    -   **Negative Evidence:** Reads like a narrative letter. Is primarily a fax cover sheet.
+
+    **'DICTATED_NOTE'**:
+    -   **Positive Evidence:** Narrative, paragraph-based text. Uses major headings like "HISTORY OF PRESENT ILLNESS", "ASSESSMENT AND PLAN".
+    -   **Negative Evidence:** Has a structured, multi-column EMR layout. Has a fax cover sheet as its first page.
+
+    **'NON_REFERRAL'**:
+    -   **Positive Evidence:** The primary purpose is to provide information, not request a consult. Contains explicit phrases like "AUTHORIZATION", "Approved Service", "Medical Clearance", "EKG Result", "FAX TRANSMITTAL FORM" (when the content is not a referral).
+    -   **Crucial Rule:** A "Referral Authorization" (like from Humana/TRICARE) IS A REFERRAL, not a Non-Referral. The word "Referral" in this context overrides "Authorization".
+
+    **Your final output MUST be a valid JSON object with a single key "classification".**
     """
-    user_input = f"Please classify the following document content:\n\n---\n\n{text_content[:4000]}"
-    # --- THE FIX: Increased reasoning effort for better accuracy ---
-    return await call_llm_with_reasoning(instructions, user_input, reasoning_effort="high", is_json=True)
-
+    user_input = f"Please classify the following document content based on the strict rules and chain-of-thought process provided:\n\n---\n\n{text_content[:6000]}"
+    return await call_llm_with_reasoning(instructions, user_input, reasoning_effort="medium", is_json=True)
 
 async def extract_referral_data(text_content: str) -> Dict[str, Any]:
     """
