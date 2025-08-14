@@ -91,13 +91,14 @@ async def classify_document(text_content: str) -> Dict[str, str]:
     - 'MODMED_NOTE': A structured EMR printout, often with a clear header (like 'OrthoSouth'), patient identifiers (MRN, DOB), and distinct sections for Allergies, Medications, HPI, Exam, etc.
     - 'NON_REFERRAL': Any other type of document, such as an invoice, a lab result cover sheet, or a medical clearance letter that isn't a direct referral.
 
+    Do note, this is the first and perhaps most important step in the entire process. I need you to be extra sure that you correctly classify all documents in order for us to avoid issues down the line in the rest of the pipeline.
+
     You MUST return a JSON object with a single key "classification" and the corresponding category string as the value.
     """
     user_input = f"Please classify the following document content:\n\n---\n\n{text_content[:4000]}"
     # --- THE FIX: Increased reasoning effort for better accuracy ---
-    return await call_llm_with_reasoning(instructions, user_input, reasoning_effort="medium", is_json=True)
+    return await call_llm_with_reasoning(instructions, user_input, reasoning_effort="high", is_json=True)
 
-# ... (The rest of the functions in this file remain exactly the same) ...
 
 async def extract_referral_data(text_content: str) -> Dict[str, Any]:
     """
